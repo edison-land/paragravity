@@ -35,7 +35,7 @@ _paragravity() {
             _describe 'paragravity commands' commands
             ;;
         args)
-            case $words[1] in
+            case ${words[2]} in
                 launch|start|stop|delete|rm|info|path)
                     _paragravity_profiles
                     ;;
