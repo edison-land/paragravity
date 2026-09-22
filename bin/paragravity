@@ -16,10 +16,10 @@ import shutil
 import argparse
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # Default configurations
 DEFAULT_APP_BIN = "/Applications/Antigravity.app/Contents/MacOS/Antigravity"
@@ -107,6 +107,22 @@ def decode_jwt_payload(jwt_str: str) -> dict:
         pass
     return {}
 
+def token_expiry_state(token_exp: str):
+    """Classify a token expiry ISO timestamp: 'expired', 'expiring' (within
+    7 days), or None when there is nothing to warn about."""
+    if not token_exp:
+        return None
+    try:
+        exp = datetime.fromisoformat(token_exp)
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(exp.tzinfo) if exp.tzinfo else datetime.now()
+    if exp < now:
+        return "expired"
+    if exp < now + timedelta(days=7):
+        return "expiring"
+    return None
+
 def extract_account_info(profile_dir: Path) -> dict:
     """Extract signed-in Google account information from profile data."""
     info = {
@@ -187,23 +203,38 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
 
     return 0
 
-def setup_home_symlinks(real_home: Path, profile_home: Path):
+# Items symlinked from the real HOME into a profile's fake HOME, by policy.
+# "full" (default) maximizes developer comfort but exposes the real ~/.ssh and
+# ~/.config to whatever runs inside the profile; "minimal" drops the sensitive
+# dotdirs; "none" links nothing.
+LINK_ITEMS_FULL = [
+    ".zshrc", ".zshenv", ".zprofile",
+    ".bashrc", ".bash_profile", ".profile",
+    ".gitconfig", ".gitignore_global",
+    ".ssh",
+    ".config",
+    ".npmrc", ".yarnrc",
+    "Desktop", "Documents", "Downloads", "Projects", "Developer",
+]
+LINK_ITEMS_MINIMAL = [
+    i for i in LINK_ITEMS_FULL
+    if i not in (".ssh", ".config", ".npmrc", ".yarnrc")
+]
+SYMLINK_POLICIES = {
+    "full": LINK_ITEMS_FULL,
+    "minimal": LINK_ITEMS_MINIMAL,
+    "none": [],
+}
+
+def setup_home_symlinks(real_home: Path, profile_home: Path, policy: str = "full"):
     """
-    Symlink essential configuration & directories from real HOME
-    to ensure developer comfort (zsh, bash, git, ssh, desktop, projects).
+    Symlink configuration & directories from the real HOME into the profile's
+    fake HOME, according to the profile's policy ("full", "minimal" or "none").
     """
     profile_home.mkdir(parents=True, exist_ok=True)
     (profile_home / ".gemini").mkdir(exist_ok=True)
 
-    link_items = [
-        ".zshrc", ".zshenv", ".zprofile",
-        ".bashrc", ".bash_profile", ".profile",
-        ".gitconfig", ".gitignore_global",
-        ".ssh",
-        ".config",
-        ".npmrc", ".yarnrc",
-        "Desktop", "Documents", "Downloads", "Projects", "Developer"
-    ]
+    link_items = SYMLINK_POLICIES.get(policy, LINK_ITEMS_FULL)
 
     for item in link_items:
         src = real_home / item
@@ -287,13 +318,14 @@ def cmd_create(args):
     home_dir.mkdir(parents=True, exist_ok=True)
     harden_profile_perms(profile_dir, profiles_dir)
 
-    # Symlink developer configs from real HOME
-    setup_home_symlinks(Path.home(), home_dir)
+    # Symlink developer configs from real HOME according to the chosen policy
+    setup_home_symlinks(Path.home(), home_dir, args.links)
 
     # Create profile metadata
     meta = {
         "name": name,
         "description": args.description or "",
+        "symlink_policy": args.links,
         "created_at": datetime.now().isoformat(),
         "version": 1
     }
@@ -312,6 +344,34 @@ def cmd_create(args):
         print()
         cmd_launch(args)
 
+def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
+    """Machine-readable summary of one profile (used by both `list --json`
+    and the human table)."""
+    name = profile_dir.name
+    data_dir = profile_dir / "data"
+    pid = get_profile_process(profile_dir, data_dir)
+    acc_info = extract_account_info(profile_dir)
+
+    meta = {}
+    meta_file = profile_dir / "profile.json"
+    if meta_file.is_file():
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            pass
+
+    return {
+        "name": name,
+        "running": bool(pid),
+        "pid": pid or None,
+        "account": acc_info.get("email"),
+        "has_token": acc_info.get("has_token", False),
+        "token_exp": acc_info.get("token_exp"),
+        "token_state": token_expiry_state(acc_info.get("token_exp")),
+        "size": get_directory_size(profile_dir) if include_size else None,
+        "description": meta.get("description", ""),
+    }
+
 def cmd_list(args):
     """List all profiles, their status, and bound accounts."""
     profiles_dir = get_profiles_dir()
@@ -325,44 +385,55 @@ def cmd_list(args):
         print(f"Run: {COLOR_CYAN}paragravity create <name>{COLOR_RESET} to create your first profile.")
         return
 
+    include_size = bool(getattr(args, "size", False))
+    summaries = [profile_summary(p, include_size=include_size) for p in profiles]
+
+    if getattr(args, "json", False):
+        print(json.dumps(summaries, indent=2, ensure_ascii=False))
+        return
+
     print(f"\n{COLOR_BOLD}{'PROFILE':<18} {'STATUS':<14} {'PID':<8} {'ACCOUNT (GOOGLE)':<30} {'SIZE':<10} {'DESCRIPTION'}{COLOR_RESET}")
     print("─" * 95)
 
-    for p in profiles:
-        name = p.name
-        data_dir = p / "data"
-        pid = get_profile_process(p, data_dir)
-        acc_info = extract_account_info(p)
-        size_str = get_directory_size(p)
-        
-        desc = ""
-        meta_file = p / "profile.json"
-        if meta_file.is_file():
-            try:
-                meta = json.loads(meta_file.read_text())
-                desc = meta.get("description", "")
-            except Exception:
-                pass
+    for s in summaries:
+        p = profiles_dir / s["name"]
 
-        if pid:
+        if s["running"]:
             status_str = f"{COLOR_GREEN}● Running{COLOR_RESET}"
-            pid_str = str(pid)
+            pid_str = str(s["pid"])
         else:
             status_str = f"{COLOR_DIM}○ Stopped{COLOR_RESET}"
             pid_str = "-"
 
-        email_str = acc_info["email"] or f"{COLOR_DIM}(Not signed in){COLOR_RESET}"
+        email_str = s["account"] or f"{COLOR_DIM}(Not signed in){COLOR_RESET}"
         if len(strip_ansi(email_str)) > 28:
             email_str = email_str[:25] + "..."
 
-        c_name = pad_visible(f"{COLOR_BOLD}{name}{COLOR_RESET}", 18)
+        size_str = s["size"] if include_size else "—"
+
+        warn = ""
+        if s["token_state"] == "expired":
+            warn = f"{COLOR_RED}⚠ token expired{COLOR_RESET}"
+        elif s["token_state"] == "expiring":
+            warn = f"{COLOR_YELLOW}⚠ token expires soon{COLOR_RESET}"
+
+        c_name = pad_visible(f"{COLOR_BOLD}{s['name']}{COLOR_RESET}", 18)
         c_status = pad_visible(status_str, 14)
         c_pid = pad_visible(pid_str, 8)
         c_email = pad_visible(email_str, 30)
         c_size = pad_visible(size_str, 10)
 
-        print(f"{c_name} {c_status} {c_pid} {c_email} {c_size} {desc}")
+        print(f"{c_name} {c_status} {c_pid} {c_email} {c_size} {s['description']} {warn}".rstrip())
     print()
+
+def prune_logs(log_dir: Path, keep: int = 10):
+    """Keep only the most recent `keep` launch logs."""
+    try:
+        logs = sorted(log_dir.glob("launch-*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in logs[keep:]:
+            old.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 def cmd_launch(args):
     """Launch an Antigravity instance for a profile."""
@@ -376,8 +447,25 @@ def cmd_launch(args):
         create_it = prompt_yes_no("Would you like to create it now? [y/N]: ")
         if create_it:
             args.description = "Auto-created on launch"
+            if not getattr(args, "links", None):
+                args.links = "full"
             cmd_create(args)
         else:
+            sys.exit(1)
+
+    meta = {}
+    meta_file = profile_dir / "profile.json"
+    if meta_file.is_file():
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            pass
+
+    workspace = None
+    if getattr(args, "path", None):
+        workspace = Path(args.path).expanduser().resolve()
+        if not workspace.exists():
+            print(f"{COLOR_RED}Error: workspace path does not exist:{COLOR_RESET} {workspace}")
             sys.exit(1)
 
     data_dir = profile_dir / "data"
@@ -394,25 +482,30 @@ def cmd_launch(args):
         print("Please specify path using --app or set ANTIGRAVITY_BIN env var.")
         sys.exit(1)
 
-    setup_home_symlinks(Path.home(), home_dir)
+    policy = getattr(args, "links", None) or meta.get("symlink_policy", "full")
+    setup_home_symlinks(Path.home(), home_dir, policy)
     harden_profile_perms(profile_dir, profiles_dir)
 
     env = os.environ.copy()
     env["HOME"] = str(home_dir.resolve())
-    
+
     # Bypass macOS Keychain for language_server: forces file-based token storage (~/.gemini/jetski-standalone-oauth-token)
     # This prevents keychain prompt collisions and isolates tokens per profile.
     env["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
     env["SSH_CLIENT"] = "127.0.0.1 50000 22"
-    
+
     cmd = [
         app_bin,
         f"--user-data-dir={data_dir.resolve()}"
     ]
+    if workspace:
+        cmd.append(str(workspace))
 
     print(f"{COLOR_CYAN}Launching Antigravity for profile '{COLOR_BOLD}{name}{COLOR_RESET}{COLOR_CYAN}'...{COLOR_RESET}")
     print(f"  • User Data: {data_dir}")
     print(f"  • Home Dir:  {home_dir}")
+    if workspace:
+        print(f"  • Workspace: {workspace}")
 
     if getattr(args, "foreground", False):
         try:
@@ -424,16 +517,30 @@ def cmd_launch(args):
         finally:
             (profile_dir / "run.pid").unlink(missing_ok=True)
     else:
-        proc = subprocess.Popen(
-            cmd,
-            env=env,
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+        log_dir = profile_dir / "logs"
+        log_dir.mkdir(exist_ok=True)
+        prune_logs(log_dir)
+        log_path = log_dir / time.strftime("launch-%Y%m%d-%H%M%S.log")
+        with open(log_path, "ab") as log_f:
+            proc = subprocess.Popen(
+                cmd,
+                env=env,
+                start_new_session=True,
+                stdout=log_f,
+                stderr=subprocess.STDOUT
+            )
         (profile_dir / "run.pid").write_text(str(proc.pid))
         print(f"{COLOR_GREEN}✓ Antigravity window launched! (PID: {proc.pid}){COLOR_RESET}")
+        print(f"  Logs:         {log_path} (view with: {COLOR_CYAN}pgrav logs {name}{COLOR_RESET})")
         print(f"  Tip: Sign in with your Google account in this window to bind it to '{name}'.")
+
+def _group_alive(pgid: int) -> bool:
+    """True when at least one process still belongs to the process group."""
+    try:
+        os.kill(pgid, 0)
+        return True
+    except OSError:
+        return False
 
 def cmd_stop(args):
     """Stop running instance of a profile."""
@@ -454,25 +561,54 @@ def cmd_stop(args):
 
     print(f"Stopping profile '{name}' (PID: {pid})...")
     try:
-        # The instance was started with start_new_session=True, so the Electron
-        # main process is a process-group leader and its children (e.g. the
-        # language server holding the OAuth token) share the group. Kill the
-        # whole group, otherwise children are orphaned and keep running.
-        target = -pid if pid == os.getpgid(pid) else pid
+        group_leader = pid == os.getpgid(pid)
     except (ProcessLookupError, PermissionError):
-        target = pid
+        group_leader = False
 
-    def _signal(sig):
-        os.kill(target, sig)
+    def _kill(sig, target):
+        try:
+            os.kill(target, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def _wait_main(deadline_s):
+        """Wait for the Electron main process to exit."""
+        for _ in range(int(deadline_s / 0.1)):
+            if not is_pid_running(pid):
+                return True
+            time.sleep(0.1)
+        return not is_pid_running(pid)
+
+    def _wait_all(deadline_s):
+        """Wait until the instance is fully gone; the main process dying alone
+        is not enough — straggler children count too."""
+        for _ in range(int(deadline_s / 0.1)):
+            if not is_pid_running(pid) and not (group_leader and _group_alive(-pid)):
+                return True
+            time.sleep(0.1)
+        return not (is_pid_running(pid) or (group_leader and _group_alive(-pid)))
+
+    def _still_alive():
+        return is_pid_running(pid) or (group_leader and _group_alive(-pid))
 
     try:
-        _signal(signal.SIGTERM)
-        for _ in range(30):
-            if not is_pid_running(pid):
-                break
-            time.sleep(0.1)
-        if is_pid_running(pid) and getattr(args, "force", False):
-            _signal(signal.SIGKILL)
+        # Stage 1: SIGTERM the Electron main process only, so it can shut down
+        # its own children and save workspace state cleanly.
+        _kill(signal.SIGTERM, pid)
+        _wait_main(3.0)
+        # Stage 2: SIGTERM the whole group (language_server etc.) — also
+        # reaps stragglers that outlived the main process.
+        if group_leader and _group_alive(-pid):
+            _kill(signal.SIGTERM, -pid)
+            _wait_all(5.0)
+        # Stage 3: SIGKILL only on request.
+        if _still_alive():
+            if getattr(args, "force", False):
+                _kill(signal.SIGKILL, -pid if group_leader else pid)
+                _wait_all(3.0)
+            if _still_alive():
+                print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
+                return
         (profile_dir / "run.pid").unlink(missing_ok=True)
         print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
     except Exception as e:
@@ -522,6 +658,20 @@ def cmd_info(args):
     acc_info = extract_account_info(profile_dir)
     size_str = get_directory_size(profile_dir)
 
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "name": name,
+            "running": bool(pid),
+            "pid": pid or None,
+            "directory": str(profile_dir),
+            "size": size_str,
+            "account": acc_info["email"],
+            "has_token": acc_info["has_token"],
+            "token_exp": acc_info.get("token_exp"),
+            "token_state": token_expiry_state(acc_info.get("token_exp")),
+        }, indent=2, ensure_ascii=False))
+        return
+
     print(f"\n{COLOR_BOLD}=== Profile: {name} ==={COLOR_RESET}")
     print(f"Status:       {COLOR_GREEN}Running (PID: {pid}){COLOR_RESET}" if pid else f"Status:       {COLOR_DIM}Stopped{COLOR_RESET}")
     print(f"Directory:    {profile_dir}")
@@ -544,6 +694,47 @@ def cmd_path(args):
         print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
+def cmd_logs(args):
+    """Show (and optionally follow) the latest launch log of a profile."""
+    profiles_dir = get_profiles_dir()
+    name = args.name.strip()
+    validate_profile_name(name)
+    profile_dir = profiles_dir / name
+
+    if not profile_dir.exists():
+        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    log_dir = profile_dir / "logs"
+    logs = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if log_dir.is_dir() else []
+    if not logs:
+        print(f"{COLOR_YELLOW}No logs yet for '{name}'. Logs are written on each background 'pgrav launch {name}'.{COLOR_RESET}")
+        return
+
+    log_path = logs[0]
+    try:
+        with open(log_path, "rb") as f:
+            # Show at most the last 128 KB of the newest log.
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 128 * 1024))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+            for line in lines[-args.lines:]:
+                print(line)
+            if not args.follow:
+                return
+            offset = f.tell()
+            print(f"{COLOR_DIM}--- following {log_path.name} (Ctrl+C to stop) ---{COLOR_RESET}")
+            while True:
+                f.seek(offset)
+                chunk = f.read()
+                if chunk:
+                    sys.stdout.write(chunk.decode("utf-8", "replace"))
+                    sys.stdout.flush()
+                    offset += len(chunk)
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        print()
+
 def main():
     parser = argparse.ArgumentParser(
         prog="paragravity",
@@ -558,17 +749,26 @@ def main():
     p_create.add_argument("name", help="Profile name (e.g. zwe, work, personal)")
     p_create.add_argument("-d", "--description", help="Short description")
     p_create.add_argument("-l", "--launch", action="store_true", help="Launch immediately after creation")
+    p_create.add_argument("--links", choices=("full", "minimal", "none"), default="full",
+                          help="How much of the real HOME to expose inside the profile "
+                               "(full links everything incl. ~/.ssh/.config; minimal skips "
+                               "those dotdirs; none links nothing but the keychain bridge)")
     p_create.set_defaults(func=cmd_create)
 
     # list / ls
     p_list = subparsers.add_parser("list", aliases=["ls"], help="List all profiles and status")
+    p_list.add_argument("--size", action="store_true", help="Also compute on-disk size of each profile (slow for large profiles)")
+    p_list.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_list.set_defaults(func=cmd_list)
 
     # launch / start
     p_launch = subparsers.add_parser("launch", aliases=["start"], help="Launch Antigravity instance for profile")
     p_launch.add_argument("name", help="Profile name to launch")
+    p_launch.add_argument("path", nargs="?", default=None, help="Optional workspace/project path to open")
     p_launch.add_argument("-f", "--foreground", action="store_true", help="Run in foreground (attached to terminal)")
     p_launch.add_argument("--app", help="Path to Antigravity binary")
+    p_launch.add_argument("--links", choices=("full", "minimal", "none"), default=None,
+                          help="Override the profile's stored symlink policy for this launch")
     p_launch.set_defaults(func=cmd_launch)
 
     # stop
@@ -586,12 +786,20 @@ def main():
     # info
     p_info = subparsers.add_parser("info", help="Show detailed profile info")
     p_info.add_argument("name", help="Profile name")
+    p_info.add_argument("--json", action="store_true", help="Output machine-readable JSON")
     p_info.set_defaults(func=cmd_info)
 
     # path
     p_path = subparsers.add_parser("path", help="Print profile directory path")
     p_path.add_argument("name", help="Profile name")
     p_path.set_defaults(func=cmd_path)
+
+    # logs
+    p_logs = subparsers.add_parser("logs", help="Show the latest launch log of a profile")
+    p_logs.add_argument("name", help="Profile name")
+    p_logs.add_argument("-f", "--follow", action="store_true", help="Keep streaming new output")
+    p_logs.add_argument("-n", "--lines", type=int, default=50, help="Number of trailing lines to show (default 50)")
+    p_logs.set_defaults(func=cmd_logs)
 
     if len(sys.argv) == 1:
         cmd_list(None)

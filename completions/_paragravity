@@ -22,6 +22,7 @@ _paragravity() {
         'rm:Alias for delete'
         'info:Show detailed profile info'
         'path:Print profile directory path'
+        'logs:Show the latest launch log of a profile'
     )
 
     _arguments -C \
@@ -36,7 +37,7 @@ _paragravity() {
             ;;
         args)
             case ${words[2]} in
-                launch|start|stop|delete|rm|info|path)
+                launch|start|stop|delete|rm|info|path|logs)
                     _paragravity_profiles
                     ;;
                 create)
