@@ -44,6 +44,9 @@ case "${SHELL_NAME}" in
     *)    RC_FILE="${HOME}/.profile" ;;
 esac
 
+# The rc file must receive a literal "$HOME" reference (expanded on shell startup),
+# hence the intentional single-quoted strings below.
+# shellcheck disable=SC2016
 if [[ "${SHELL_NAME}" == "fish" ]]; then
     if ! grep -qsF 'set -gx PATH $HOME/.local/bin $PATH' "${RC_FILE}"; then
         echo " • Adding ${INSTALL_DIR} to PATH in ${RC_FILE}..."

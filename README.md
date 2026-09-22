@@ -18,7 +18,7 @@ English | [简体中文](README_zh.md)
 - 🛡️ **100% Non-Invasive**: Built strictly on Chromium/Electron's official `--user-data-dir` sandboxing. Zero binary patching, zero internal database modifications, zero account security risks.
 - 🔑 **Native Google OAuth**: Complete, untouched Google Cloud authentication flow. Token refresh and sign-in redirects work seamlessly without proxies or interruptions.
 - 🔍 **macOS Native Integration**: Automatically generates independent macOS `.app` bundles with app icons. Launch your instances directly via **Spotlight (`Cmd + Space`)** or Dock.
-- ⚡ **Zero-Footprint & Ultra-Lightweight**: No background daemon eating RAM (0 MB idle overhead). Powered purely by macOS native Python 3 with zero external pip or npm dependencies.
+- ⚡ **Zero-Footprint & Ultra-Lightweight**: No background daemon eating RAM (0 MB idle overhead). Powered purely by Python 3 with zero external pip or npm dependencies. (macOS provides `python3` through the Xcode Command Line Tools — run `xcode-select --install` if it's missing; any Python ≥ 3.8 on your `PATH` works too.)
 - 🗂️ **Total Workspace Isolation**: Each instance maintains completely separated extensions, local storage, indexedDB, and chat histories, preventing workspace contamination.
 
 ---
@@ -52,7 +52,7 @@ pgrav create zwe
 This instantly:
 - Provisions an isolated sandbox at `~/.antigravity-profiles/zwe`
 - Generates a native macOS application `Antigravity (zwe).app` in `~/Applications`
-- Registers it with macOS LaunchServices for **Spotlight (`Cmd + Space`)** indexing
+- Lives in `~/Applications`, which Spotlight indexes automatically — find it with **Spotlight (`Cmd + Space`)**
 
 To launch immediately upon creation:
 ```bash
@@ -95,6 +95,31 @@ pgrav info zwe
 ```bash
 pgrav delete zwe
 ```
+
+---
+
+## 🗑️ Uninstall
+
+```bash
+# Remove the CLI (skip the brew line if you didn't use Homebrew)
+brew uninstall paragravity   # or: rm ~/.local/bin/paragravity ~/.local/bin/pgrav
+
+# Remove every profile sandbox (⚠️ permanently deletes all sign-in state and data)
+rm -rf ~/.antigravity-profiles
+
+# Remove the generated profile launchers
+rm -rf ~/Applications/Antigravity\ \(*\).app
+
+# Finally, remove the `export PATH="$HOME/.local/bin:$PATH"` line install.sh
+# appended to your shell rc file, if present.
+```
+
+---
+
+## 🔐 Security Notes
+
+- Each profile stores its Google OAuth token as a **plaintext file** inside the sandbox (`~/.antigravity-profiles/<name>/home/.gemini/jetski-standalone-oauth-token`). Profile directories are created with `0700` permissions, but don't sync or back up `~/.antigravity-profiles` to cloud drives or repositories.
+- For developer comfort, profile homes symlink some real locations (`~/.ssh`, `~/.config`, `~/.gitconfig`, `Desktop`, `Documents`, `Downloads`, …). That means an agent running inside a profile can read those real files — delete unwanted entries from `link_items` in `setup_home_symlinks()` if you want a tighter sandbox.
 
 ---
 
