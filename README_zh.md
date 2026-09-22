@@ -61,6 +61,12 @@ pgrav create zwe
 pgrav create work --launch
 ```
 
+如果不想把真实的 `~/.ssh`、`~/.config` 暴露给分身内运行的 Agent，可以用 `--links` 收紧软链策略（默认 `full` 保持原行为）：
+```bash
+pgrav create work --links minimal   # 链接 git/shell 配置和常用项目目录，跳过 .ssh/.config
+pgrav create work --links none      # 几乎不链接任何真实目录（仅保留钥匙串桥接）
+```
+
 ### 2. 查看所有分身状态
 查看所有分身、当前进程运行状态、以及绑定的 Google 账号：
 ```bash
@@ -69,12 +75,14 @@ pgrav list
 pgrav ls
 ```
 
+> 💡 目录大小会全量遍历分身文件，分身很大时比较慢，因此默认不显示。需要时用 `pgrav list --size`；脚本/CI 里可用 `pgrav list --json` 拿到机器可读输出。
+
 **终端输出示例：**
 ```text
 PROFILE            STATUS         PID      ACCOUNT (GOOGLE)               SIZE       DESCRIPTION
 ───────────────────────────────────────────────────────────────────────────────────────────────
-zwe                ● Running      49377    zwe.dev@gmail.com              24.5 MB    开发主账号
-work               ○ Stopped      -        work@company.com               18.2 MB    公司业务账号
+zwe                ● Running      49377    zwe.dev@gmail.com              —          开发主账号
+work               ○ Stopped      -        work@company.com               —          公司业务账号
 ```
 
 ### 3. 启动分身
@@ -83,17 +91,32 @@ pgrav launch zwe
 ```
 *或者直接在 Mac 任意位置按 `Cmd + Space` 键入 `Antigravity (zwe)` 回车启动！*
 
+启动时可以直接带上要打开的项目目录：
+```bash
+pgrav launch zwe ~/Projects/demo
+```
+
 ### 4. 停止运行中的分身
 ```bash
 pgrav stop zwe
 ```
+停止是分阶段进行的：先让主进程优雅退出并保存工作区状态，再清理残留子进程；卡住时才用 `--force` 强杀。
 
-### 5. 查看分身详细诊断信息
+### 5. 查看分身日志
+后台启动的窗口日志落在 `~/.antigravity-profiles/<名字>/logs/`，方便排查启动失败、登录与 token 刷新问题：
 ```bash
-pgrav info zwe
+pgrav logs zwe         # 查看最近一次启动日志的末尾
+pgrav logs zwe -f      # 实时跟踪输出
+pgrav logs zwe -n 200  # 显示最后 200 行
 ```
 
-### 6. 一键删除分身
+### 6. 查看分身详细诊断信息
+```bash
+pgrav info zwe
+# 脚本里可用：pgrav info zwe --json
+```
+
+### 7. 一键删除分身
 清理分身沙盒数据及其 macOS 快捷图标：
 ```bash
 pgrav delete zwe
@@ -122,7 +145,7 @@ rm -rf ~/Applications/Antigravity\ \(*\).app
 ## 🔐 安全须知
 
 - 每个分身的 Google OAuth Token 以**明文文件**形式存放在沙盒内（`~/.antigravity-profiles/<name>/home/.gemini/jetski-standalone-oauth-token`）。分身目录以 `0700` 权限创建，但请不要把 `~/.antigravity-profiles` 同步到网盘或提交进仓库。
-- 出于开发便利考虑，分身的假 HOME 会软链部分真实目录（`~/.ssh`、`~/.config`、`~/.gitconfig`、`Desktop`、`Documents`、`Downloads` 等）。这意味着分身内运行的 Agent 可以读到这些真实文件——如需更严格的隔离，可删除 `setup_home_symlinks()` 中 `link_items` 里不需要的条目。
+- 出于开发便利考虑，分身的假 HOME 默认（`full` 策略）会软链部分真实目录（`~/.ssh`、`~/.config`、`~/.gitconfig`、`Desktop`、`Documents`、`Downloads` 等），这意味着分身内运行的 Agent 可以读到这些真实文件。创建分身时用 `--links minimal`（跳过 `.ssh`/`.config` 等敏感点目录）或 `--links none`（几乎不链接）即可收紧，无需改代码。`launch --links` 也可以临时覆盖。
 
 ---
 
