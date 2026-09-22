@@ -56,6 +56,16 @@ def prompt_yes_no(message: str, default_no: bool = True) -> bool:
         return not default_no
     return answer == "y" if answer else not default_no
 
+def harden_profile_perms(profile_dir: Path, profiles_dir: Path):
+    """Once signed in, a profile holds a plaintext OAuth token file, so keep
+    the profile directories accessible to the owner only."""
+    try:
+        for d in (profiles_dir, profile_dir, profile_dir / "data", profile_dir / "home"):
+            if d.is_dir():
+                os.chmod(d, 0o700)
+    except OSError:
+        pass
+
 def get_app_binary() -> str:
     env_bin = os.environ.get("ANTIGRAVITY_BIN")
     if env_bin and os.path.isfile(env_bin):
@@ -267,6 +277,7 @@ def cmd_create(args):
 
     profile_dir = profiles_dir / name
     if profile_dir.exists():
+        harden_profile_perms(profile_dir, profiles_dir)
         print(f"{COLOR_YELLOW}Profile '{name}' already exists at {profile_dir}{COLOR_RESET}")
         return
 
@@ -274,6 +285,7 @@ def cmd_create(args):
     home_dir = profile_dir / "home"
     data_dir.mkdir(parents=True, exist_ok=True)
     home_dir.mkdir(parents=True, exist_ok=True)
+    harden_profile_perms(profile_dir, profiles_dir)
 
     # Symlink developer configs from real HOME
     setup_home_symlinks(Path.home(), home_dir)
@@ -383,6 +395,7 @@ def cmd_launch(args):
         sys.exit(1)
 
     setup_home_symlinks(Path.home(), home_dir)
+    harden_profile_perms(profile_dir, profiles_dir)
 
     env = os.environ.copy()
     env["HOME"] = str(home_dir.resolve())
