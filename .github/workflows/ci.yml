@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: py_compile (${{ matrix.python }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Exercise both the CLT-provided system interpreter (3.9) and the
+        # Homebrew interpreter the runner defaults to (3.14).
+        python: ["/usr/bin/python3", "python3"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax check
+        run: "${{ matrix.python }} -m py_compile bin/paragravity"
+
+  tests:
+    name: Unit tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test suite
+        run: python3 -m unittest discover -s tests -v
+
+  shellcheck:
+    name: shellcheck
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: brew install shellcheck
+      - name: Lint install.sh
+        run: shellcheck install.sh
+
+  brew-audit:
+    name: brew audit --strict
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit formula from a scratch tap
+        run: |
+          TAP="$(brew --repository)/Library/Taps/ci/local"
+          mkdir -p "$TAP/Formula"
+          cp Formula/paragravity.rb "$TAP/Formula/paragravity.rb"
+          brew audit --strict --formula ci/local/paragravity
