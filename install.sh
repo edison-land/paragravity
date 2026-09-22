@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ParaGravity One-Line Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/<YOUR-USER>/paragravity/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash
 
-set -e
+set -euo pipefail
 
 REPO="${PARAGRAVITY_REPO:-edison-land/paragravity}"
 BRANCH="${PARAGRAVITY_BRANCH:-main}"
@@ -32,7 +32,8 @@ chmod +x "${INSTALL_DIR}/paragravity"
 # Symlink pgrav alias
 ln -sf "paragravity" "${INSTALL_DIR}/pgrav"
 
-# Configure Shell PATH if needed
+# Configure Shell PATH if needed (check the rc file itself, so re-running the
+# installer never appends duplicate PATH lines)
 SHELL_NAME="$(basename "${SHELL:-zsh}")"
 RC_FILE=""
 
@@ -43,13 +44,14 @@ case "${SHELL_NAME}" in
     *)    RC_FILE="${HOME}/.profile" ;;
 esac
 
-if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-    echo " • Adding ${INSTALL_DIR} to PATH in ${RC_FILE}..."
-    if [[ "${SHELL_NAME}" == "fish" ]]; then
+if [[ "${SHELL_NAME}" == "fish" ]]; then
+    if ! grep -qsF 'set -gx PATH $HOME/.local/bin $PATH' "${RC_FILE}"; then
+        echo " • Adding ${INSTALL_DIR} to PATH in ${RC_FILE}..."
         echo "set -gx PATH \$HOME/.local/bin \$PATH" >> "${RC_FILE}"
-    else
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${RC_FILE}"
     fi
+elif ! grep -qsF 'export PATH="$HOME/.local/bin:$PATH"' "${RC_FILE}"; then
+    echo " • Adding ${INSTALL_DIR} to PATH in ${RC_FILE}..."
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "${RC_FILE}"
 fi
 
 echo ""
