@@ -8,12 +8,14 @@ and HOME overrides), so nothing here touches the developer's real profiles or
 import contextlib
 import importlib.machinery
 import importlib.util
+import json
 import os
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -261,6 +263,109 @@ class ProcessManagementTests(unittest.TestCase):
                 self.assertTrue((profiles / "grp").exists())
             finally:
                 run_cli(["stop", "grp"], env)
+
+
+class NewFeatureTests(unittest.TestCase):
+    """Logs, workspace path, --json, --links and token-expiry features."""
+
+    def _make_echoing_app(self, home: Path) -> Path:
+        fake = home / "fake-antigravity"
+        fake.write_text("#!/bin/sh\necho fake-app-started\necho booting-language-server\nsleep 300\n")
+        fake.chmod(0o755)
+        return fake
+
+    def test_launch_writes_log_and_logs_command_reads_it(self):
+        with sandbox_home() as (home, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            fake = self._make_echoing_app(home)
+            self.assertEqual(run_cli(["create", "lg"], env).returncode, 0)
+            self.assertEqual(run_cli(["launch", "lg", "--app", str(fake)], env).returncode, 0)
+            try:
+                log_dir = profiles / "lg" / "logs"
+                self.assertTrue(wait_until(lambda: log_dir.is_dir() and any(
+                    p.stat().st_size > 0 for p in log_dir.glob("launch-*.log"))),
+                    "launch must write a non-empty log file")
+                result = run_cli(["logs", "lg"], env)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("fake-app-started", result.stdout)
+                self.assertIn("booting-language-server", result.stdout)
+            finally:
+                run_cli(["stop", "lg"], env)
+
+    def test_logs_without_launches_is_friendly(self):
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "lg"], env).returncode, 0)
+            result = run_cli(["logs", "lg"], env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No logs yet", result.stdout)
+
+    def test_launch_rejects_nonexistent_workspace_path(self):
+        with sandbox_home() as (home, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            fake = self._make_echoing_app(home)
+            self.assertEqual(run_cli(["create", "ws"], env).returncode, 0)
+            result = run_cli(["launch", "ws", "--app", str(fake), "/definitely/not/here"], env)
+            self.assertEqual(result.returncode, 1, result)
+            self.assertIn("does not exist", result.stdout)
+            self.assertFalse((profiles / "ws" / "run.pid").exists(), "must not record a pid")
+
+    def test_list_json_is_parseable(self):
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "jz", "-d", "desc"], env).returncode, 0)
+            result = run_cli(["list", "--json"], env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            items = json.loads(result.stdout)
+            item = next(i for i in items if i["name"] == "jz")
+            for key in ("running", "pid", "account", "has_token", "token_exp", "token_state", "size", "description"):
+                self.assertIn(key, item)
+            self.assertEqual(item["description"], "desc")
+            self.assertFalse(item["running"])
+
+    def test_info_json_is_parseable(self):
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "jz"], env).returncode, 0)
+            result = run_cli(["info", "jz", "--json"], env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["name"], "jz")
+            self.assertIn("directory", data)
+
+    def test_symlink_policy_minimal_and_none(self):
+        with sandbox_home() as (home, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            (home / ".ssh").mkdir()
+            (home / ".config").mkdir()
+            (home / "Projects").mkdir()
+            # The keychain bridge links from ~/Library/Keychains — create it so
+            # "none" has something to keep.
+            (home / "Library" / "Keychains").mkdir(parents=True)
+
+            self.assertEqual(run_cli(["create", "nonep", "--links", "none"], env).returncode, 0)
+            p_home = profiles / "nonep" / "home"
+            self.assertFalse((p_home / ".ssh").exists(), "'none' must not link ~/.ssh")
+            self.assertFalse((p_home / "Projects").exists(), "'none' must not link project dirs")
+            self.assertTrue((p_home / "Library" / "Keychains").exists(),
+                            "keychain bridge must stay for Chromium cookie crypto")
+
+            self.assertEqual(run_cli(["create", "minp", "--links", "minimal"], env).returncode, 0)
+            m_home = profiles / "minp" / "home"
+            self.assertFalse((m_home / ".ssh").exists(), "'minimal' must not link ~/.ssh")
+            self.assertFalse((m_home / ".config").exists(), "'minimal' must not link ~/.config")
+            self.assertTrue((m_home / "Projects").is_symlink(), "'minimal' keeps project dirs")
+
+            self.assertEqual(run_cli(["create", "fullp"], env).returncode, 0)
+            f_home = profiles / "fullp" / "home"
+            self.assertTrue((f_home / ".ssh").is_symlink(), "default policy is 'full'")
+
+    def test_token_expiry_state_classification(self):
+        module = load_cli_module()
+        self.assertIsNone(module.token_expiry_state(None))
+        self.assertIsNone(module.token_expiry_state(""))
+        self.assertIsNone(module.token_expiry_state("garbage"))
+        now = datetime.now()
+        self.assertEqual(module.token_expiry_state((now - timedelta(days=1)).isoformat()), "expired")
+        self.assertEqual(module.token_expiry_state((now + timedelta(days=3)).isoformat()), "expiring")
+        self.assertEqual(module.token_expiry_state((now + timedelta(days=30)).isoformat()), None)
 
 
 class PermissionTests(unittest.TestCase):
