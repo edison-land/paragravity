@@ -41,6 +41,21 @@ def get_profiles_dir() -> Path:
         return Path(env_dir).expanduser()
     return DEFAULT_PROFILES_DIR
 
+def validate_profile_name(name: str):
+    """Reject names that could escape the profiles directory or be interpreted by a shell."""
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name):
+        print(f"{COLOR_RED}Error: Invalid profile name '{name}'. Use 1-64 characters: letters, digits, '.', '_', '-' (must start with a letter or digit).{COLOR_RESET}")
+        sys.exit(1)
+
+def prompt_yes_no(message: str, default_no: bool = True) -> bool:
+    """Read a y/n answer; on EOF (non-interactive stdin) fall back to the default."""
+    try:
+        answer = input(message).strip().lower()
+    except EOFError:
+        return not default_no
+    return answer == "y" if answer else not default_no
+
 def get_app_binary() -> str:
     env_bin = os.environ.get("ANTIGRAVITY_BIN")
     if env_bin and os.path.isfile(env_bin):
@@ -149,9 +164,11 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
         except Exception:
             pass
 
-    # Fallback to pgrep
+    # Fallback to pgrep ("--" so the pattern isn't parsed as options; anchored so
+    # a search for profile "work" doesn't match "work2"'s data dir)
     try:
-        out = subprocess.check_output(["pgrep", "-f", f"--user-data-dir={data_dir}"], stderr=subprocess.DEVNULL)
+        pattern = f"--user-data-dir={data_dir.resolve()}( |$)"
+        out = subprocess.check_output(["pgrep", "-f", "--", pattern], stderr=subprocess.DEVNULL)
         pids = [int(p) for p in out.decode().split() if p.strip()]
         if pids:
             return pids[0]
@@ -209,7 +226,13 @@ def create_macos_app_shortcut(profile_name: str, app_display_name: str = None) -
     script_path = Path(__file__).resolve()
     orig_icns = Path("/Applications/Antigravity.app/Contents/Resources/icon.icns")
 
-    osa_cmd = f'''do shell script "python3 '{script_path}' launch {profile_name} > /dev/null 2>&1 &"'''
+    # Use the interpreter that is running us right now instead of a bare
+    # "python3": applets launched from Spotlight only get the launchd PATH
+    # (/usr/bin:/bin:/usr/sbin:/sbin), where python3 is the Command Line Tools
+    # shim and fails if CLT is not installed.
+    py_bin = (sys.executable or "python3").replace("'", "'\\''")
+    script_escaped = str(script_path).replace("'", "'\\''")
+    osa_cmd = f'''do shell script "'{py_bin}' '{script_escaped}' launch {profile_name} > /dev/null 2>&1 &"'''
     try:
         subprocess.run(["osacompile", "-o", str(target_app), "-e", osa_cmd], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if orig_icns.exists():
@@ -228,20 +251,19 @@ def remove_macos_app_shortcut(profile_name: str):
     apps_dir = Path.home() / "Applications"
     if not apps_dir.exists():
         return
-    for app in apps_dir.glob(f"Antigravity ({profile_name})*.app"):
-        shutil.rmtree(app, ignore_errors=True)
-    for app in apps_dir.glob(f"Antigravity-{profile_name}*.app"):
-        shutil.rmtree(app, ignore_errors=True)
+    # Exact names only — a glob like "Antigravity (zwe)*.app" would also match
+    # unrelated bundles such as "Antigravity (zwe) copy.app".
+    for app in (apps_dir / f"Antigravity ({profile_name}).app", apps_dir / f"Antigravity-{profile_name}.app"):
+        if app.is_dir() and app.name.endswith(".app"):
+            shutil.rmtree(app, ignore_errors=True)
 
 def cmd_create(args):
     """Create a new isolated profile."""
     profiles_dir = get_profiles_dir()
     profiles_dir.mkdir(parents=True, exist_ok=True)
-    
+
     name = args.name.strip()
-    if not name or any(c in name for c in "/\\ :?*\"<>|"):
-        print(f"{COLOR_RED}Error: Invalid profile name '{name}'. Please use alphanumeric characters, '-' and '_'.{COLOR_RESET}")
-        sys.exit(1)
+    validate_profile_name(name)
 
     profile_dir = profiles_dir / name
     if profile_dir.exists():
@@ -334,12 +356,13 @@ def cmd_launch(args):
     """Launch an Antigravity instance for a profile."""
     profiles_dir = get_profiles_dir()
     name = args.name.strip()
+    validate_profile_name(name)
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
         print(f"{COLOR_YELLOW}Profile '{name}' does not exist.{COLOR_RESET}")
-        create_it = input("Would you like to create it now? [y/N]: ").strip().lower()
-        if create_it == "y":
+        create_it = prompt_yes_no("Would you like to create it now? [y/N]: ")
+        if create_it:
             args.description = "Auto-created on launch"
             cmd_create(args)
         else:
@@ -403,6 +426,7 @@ def cmd_stop(args):
     """Stop running instance of a profile."""
     profiles_dir = get_profiles_dir()
     name = args.name.strip()
+    validate_profile_name(name)
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
@@ -416,9 +440,26 @@ def cmd_stop(args):
         return
 
     print(f"Stopping profile '{name}' (PID: {pid})...")
-    sig = signal.SIGKILL if getattr(args, "force", False) else signal.SIGTERM
     try:
-        os.kill(pid, sig)
+        # The instance was started with start_new_session=True, so the Electron
+        # main process is a process-group leader and its children (e.g. the
+        # language server holding the OAuth token) share the group. Kill the
+        # whole group, otherwise children are orphaned and keep running.
+        target = -pid if pid == os.getpgid(pid) else pid
+    except (ProcessLookupError, PermissionError):
+        target = pid
+
+    def _signal(sig):
+        os.kill(target, sig)
+
+    try:
+        _signal(signal.SIGTERM)
+        for _ in range(30):
+            if not is_pid_running(pid):
+                break
+            time.sleep(0.1)
+        if is_pid_running(pid) and getattr(args, "force", False):
+            _signal(signal.SIGKILL)
         (profile_dir / "run.pid").unlink(missing_ok=True)
         print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
     except Exception as e:
@@ -428,6 +469,7 @@ def cmd_delete(args):
     """Delete a profile and its shortcuts."""
     profiles_dir = get_profiles_dir()
     name = args.name.strip()
+    validate_profile_name(name)
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
@@ -441,8 +483,8 @@ def cmd_delete(args):
         sys.exit(1)
 
     if not getattr(args, "force", False):
-        confirm = input(f"Are you sure you want to permanently delete profile '{name}'? [y/N]: ").strip().lower()
-        if confirm != "y":
+        confirm = prompt_yes_no(f"Are you sure you want to permanently delete profile '{name}'? [y/N]: ")
+        if not confirm:
             print("Aborted.")
             return
 
@@ -454,6 +496,7 @@ def cmd_info(args):
     """Show detailed diagnostic profile info."""
     profiles_dir = get_profiles_dir()
     name = args.name.strip()
+    validate_profile_name(name)
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
@@ -480,6 +523,7 @@ def cmd_path(args):
     """Print the absolute directory path of a profile."""
     profiles_dir = get_profiles_dir()
     name = args.name.strip()
+    validate_profile_name(name)
     profile_dir = profiles_dir / name
     if profile_dir.exists():
         print(profile_dir.resolve())
