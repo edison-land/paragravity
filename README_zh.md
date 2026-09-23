@@ -152,6 +152,21 @@ pgrav info zwe
 pgrav delete zwe
 ```
 
+### 8. 现代 Web 控制台与悬浮挂件 (HUD)
+零额外依赖在浏览器中可视化掌控所有多开分身：
+```bash
+# 启动全屏多宫格 Web 控制台 (支持网格平铺、批量启停、macOS 智能窗口吸附)
+pgrav web
+# 或简写：
+pgrav ui
+
+# 启动轻量悬浮挂件 HUD 视图
+pgrav widget
+# 或：
+pgrav ui --widget
+```
+*小提示：在浏览器访问 `http://127.0.0.1:3888` 可进入完整矩阵控制台，访问 `http://127.0.0.1:3888/widget` 可获得极致精简的小挂件。*
+
 ---
 
 ## 🗑️ 卸载
@@ -214,6 +229,15 @@ ParaGravity 通过三层原生机制实现安全隔离：
 3. 提交您的修改 (`git commit -m 'Add some amazing feature'`)
 4. 推送到分支 (`git push origin feature/amazing-feature`)
 5. 新建 Pull Request
+
+---
+
+## 👥 贡献者致谢 (Contributors)
+
+特别鸣谢为 ParaGravity 做出核心贡献的开发者：
+
+- [@Kimberlying](https://github.com/Kimberlying) (Kimberly Qian) — 现代 Web 控制台前端、多实例自适应矩阵布局与批量启动坞设计。
+- [@realdahuang](https://github.com/realdahuang) — 威胁模型审计、分身配置继承安全隔离模型与 Windows 跨平台兼容架构。
 
 ---
 

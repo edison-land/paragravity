@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .DS_Store
+node_modules/
+*.tsbuildinfo
+dashboard/dist/
+dashboard/node_modules/

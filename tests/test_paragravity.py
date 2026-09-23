@@ -694,5 +694,89 @@ class ConfigurationInheritanceTests(unittest.TestCase):
                     self.assertEqual(res.returncode, 1)
 
 
+class WebConsoleTests(unittest.TestCase):
+    """Unit tests for the Web Console & Widget Server."""
+
+    def test_web_help_command(self):
+        with sandbox_home() as (_, env):
+            res = run_cli(["web", "--help"], env)
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("--port", res.stdout)
+            self.assertIn("--widget", res.stdout)
+            self.assertIn("--no-browser", res.stdout)
+
+    def test_web_server_endpoints(self):
+        import urllib.request
+        import threading
+
+        with sandbox_home() as (home, env):
+            self.assertEqual(run_cli(["create", "webtest"], env).returncode, 0)
+
+            # Ensure current process env has PARAGRAVITY_PROFILES_DIR
+            old_profiles_dir = os.environ.get("PARAGRAVITY_PROFILES_DIR")
+            os.environ["PARAGRAVITY_PROFILES_DIR"] = env["PARAGRAVITY_PROFILES_DIR"]
+
+            # Import and start web_server on an ephemeral port
+            sys.path.insert(0, str(REPO_ROOT / "bin"))
+            import web_server
+
+            server_address = ("127.0.0.1", 0)  # Bind ephemeral free port
+            httpd = web_server.ThreadingHTTPServer(server_address, web_server.ParaGravityHandler)
+            port = httpd.server_port
+
+            server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            server_thread.start()
+
+            try:
+                base_url = f"http://127.0.0.1:{port}"
+
+                # 1. System API
+                with urllib.request.urlopen(f"{base_url}/api/system", timeout=3) as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode())
+                    self.assertIn("version", data)
+                    self.assertIn("platform", data)
+
+                # 2. Profiles API
+                with urllib.request.urlopen(f"{base_url}/api/profiles", timeout=3) as resp:
+                    self.assertEqual(resp.status, 200)
+                    profiles = json.loads(resp.read().decode())
+                    names = [p["name"] for p in profiles]
+                    self.assertIn("webtest", names)
+
+                # 3. Widget endpoint
+                with urllib.request.urlopen(f"{base_url}/widget", timeout=3) as resp:
+                    self.assertEqual(resp.status, 200)
+                    html = resp.read().decode()
+                    self.assertIn("ParaGravity 悬浮挂件 HUD", html)
+
+                # 4. Fallback / Main console endpoint
+                with urllib.request.urlopen(f"{base_url}/", timeout=3) as resp:
+                    self.assertEqual(resp.status, 200)
+                    html = resp.read().decode()
+                    self.assertIn("ParaGravity", html)
+
+                # 5. Cross-origin rejection check
+                req = urllib.request.Request(
+                    f"{base_url}/api/batch/launch",
+                    data=json.dumps({"names": []}).encode(),
+                    headers={"Origin": "http://evil-attacker.com", "Content-Type": "application/json"},
+                    method="POST"
+                )
+                try:
+                    urllib.request.urlopen(req, timeout=3)
+                    self.fail("Cross-origin request from untrusted origin must be rejected")
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 403)
+
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                if old_profiles_dir is not None:
+                    os.environ["PARAGRAVITY_PROFILES_DIR"] = old_profiles_dir
+                else:
+                    os.environ.pop("PARAGRAVITY_PROFILES_DIR", None)
+
+
 if __name__ == "__main__":
     unittest.main()
