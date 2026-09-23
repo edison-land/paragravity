@@ -41,6 +41,11 @@ git clone https://github.com/edison-land/paragravity.git $HOME\.paragravity
 pgrav create work
 ```
 
+> 💡 **Windows notes**
+> - Open a **new terminal** after updating `PATH` — already-open shells won't pick up the change.
+> - `python` must be on `PATH` (any Python 3.8+ install works).
+> - **Git Bash (MSYS2) is fully supported.** `bin/pgrav` is a real POSIX script rather than a symlink, so it survives clones made with Windows' default `core.symlinks=false` and forwards arguments correctly. In CMD/PowerShell the bundled `pgrav.cmd` is used automatically.
+
 ### 3. Homebrew Tap (Coming Soon)
 
 ```bash
