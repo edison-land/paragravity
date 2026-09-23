@@ -43,6 +43,11 @@ git clone https://github.com/edison-land/paragravity.git $HOME\.paragravity
 pgrav create work
 ```
 
+> 💡 **Windows 说明**
+> - 修改 `PATH` 后请**重新打开终端**才会生效，已打开的终端不会自动感知。
+> - `python` 需在 `PATH` 中（任意 Python 3.8+ 版本即可）。
+> - **Git Bash (MSYS2) 完全支持。** `bin/pgrav` 是真实的 POSIX 脚本而非符号链接，因此在 Windows 默认 `core.symlinks=false` 的克隆下不会退化，参数转发正常。CMD/PowerShell 则会自动使用自带的 `pgrav.cmd`。
+
 ### 3. Homebrew 安装（即将推出）
 
 ```bash

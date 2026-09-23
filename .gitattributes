@@ -1,0 +1,5 @@
+# Shell scripts must stay LF: with CRLF checkouts (core.autocrlf=true, the
+# Windows default) the shebang breaks and VAR=... lines silently gain a
+# trailing \r, which corrupts values and breaks Git Bash execution.
+*.sh text eol=lf
+bin/pgrav text eol=lf

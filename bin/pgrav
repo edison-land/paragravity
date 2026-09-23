@@ -1,1 +1,11 @@
-paragravity
+#!/bin/sh
+# ParaGravity short alias. Intentionally a real POSIX script rather than a
+# symlink: git clones on Windows (core.symlinks=false) degrade symlinks to
+# plain text files, and executing the degraded file in Git Bash silently
+# drops all arguments. Prefer python3 (macOS/Linux); fall back to python
+# (Windows, where python.org installers provide no python3.exe).
+DIR="$(cd "$(dirname "$0")" && pwd)"
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 "$DIR/paragravity" "$@"
+fi
+exec python "$DIR/paragravity" "$@"
