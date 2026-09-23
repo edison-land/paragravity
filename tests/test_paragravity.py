@@ -21,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "bin" / "paragravity"
 IS_DARWIN = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
 
 # Names that must be rejected by validate_profile_name (command injection,
 # path traversal, glob/glob-metachar abuse).
@@ -250,9 +251,13 @@ class ProcessManagementTests(unittest.TestCase):
     def test_delete_refuses_while_running(self):
         with sandbox_home() as (home, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
-            fake = home / "fake-antigravity"
-            fake.write_text("#!/bin/sh\nsleep 300\n")
-            fake.chmod(0o755)
+            if IS_WINDOWS:
+                fake = home / "fake-antigravity.cmd"
+                fake.write_text("@echo off\nping 127.0.0.1 -n 300 > nul\n")
+            else:
+                fake = home / "fake-antigravity"
+                fake.write_text("#!/bin/sh\nsleep 300\n")
+                fake.chmod(0o755)
 
             self.assertEqual(run_cli(["create", "grp"], env).returncode, 0)
             self.assertEqual(run_cli(["launch", "grp", "--app", str(fake)], env).returncode, 0)
@@ -334,9 +339,13 @@ class NewFeatureTests(unittest.TestCase):
     """Logs, workspace path, --json, --links and token-expiry features."""
 
     def _make_echoing_app(self, home: Path) -> Path:
-        fake = home / "fake-antigravity"
-        fake.write_text("#!/bin/sh\necho fake-app-started\necho booting-language-server\nsleep 300\n")
-        fake.chmod(0o755)
+        if IS_WINDOWS:
+            fake = home / "fake-antigravity.cmd"
+            fake.write_text("@echo off\necho fake-app-started\necho booting-language-server\nping 127.0.0.1 -n 300 > nul\n")
+        else:
+            fake = home / "fake-antigravity"
+            fake.write_text("#!/bin/sh\necho fake-app-started\necho booting-language-server\nsleep 300\n")
+            fake.chmod(0o755)
         return fake
 
     def test_launch_writes_log_and_logs_command_reads_it(self):
@@ -435,6 +444,7 @@ class NewFeatureTests(unittest.TestCase):
 
 class PermissionTests(unittest.TestCase):
 
+    @unittest.skipIf(IS_WINDOWS, "POSIX 0700 file modes are not applicable to Windows NTFS")
     def test_profile_dirs_are_owner_only(self):
         with sandbox_home() as (_, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
@@ -603,6 +613,8 @@ class ConfigurationInheritanceTests(unittest.TestCase):
             self.assertNotIn("mcpServers", gemini_s)
 
     def test_security_symlink_attack_rejection(self):
+        if IS_WINDOWS:
+            self.skipTest("Symlink attack testing requires elevation or Developer Mode on Windows")
         with sandbox_home() as (home, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
             canary = home / "secret_host_canary.txt"

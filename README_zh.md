@@ -1,12 +1,12 @@
 # 🌌 ParaGravity (`pgrav`)
 
 > **Google Antigravity 原生非侵入式多账号并行与沙盒管理器。**  
-> 支持在 macOS 上同时并行开启多个独立的 Antigravity 窗口，左右分屏协同开发，彻底解决单账号配额限制。
+> 支持在 macOS 和 Windows 上同时并行开启多个独立的 Antigravity 窗口，左右分屏协同开发，彻底解决单账号配额限制。
 
 [English](README.md) | 简体中文
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)]()
+[![Platform: macOS | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey.svg)]()
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-yellow.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
 
@@ -17,15 +17,15 @@
 - 🚀 **真正的多实例并发**：支持多个 Google Gemini Pro 账号同时打开独立窗口、并排写代码，无需重启应用或频繁切换会话。
 - 🛡️ **100% 零侵入安全架构**：纯粹基于 Chromium/Electron 官方标准 `--user-data-dir` 隔离。绝不给二进制打补丁、不篡改内部 SQLite 数据库，零封号与配置损坏风险。
 - 🔑 **纯官方原生 OAuth**：完整保留官方 Google Cloud 登录与鉴权链路，浏览器授权跳转与 Token 自动刷新 100% 丝滑顺畅。
-- 🔍 **macOS 原生系统集成**：自动在系统生成带专属图标的独立 `.app`，可直接通过 **Spotlight (`Cmd + Space`)** 键入名字秒级直达。
-- ⚡ **零后台常驻与极度轻量**：没有吃内存的常驻守护进程（闲置内存占用 0 MB）。纯 Python 3 驱动，零外部 pip 或 npm 依赖。（macOS 的 `python3` 由 Xcode 命令行工具提供，缺失时执行 `xcode-select --install` 即可；`PATH` 上任意 ≥ 3.8 的 Python 也可用。）
+- 🔍 **操作系统原生集成**：自动在 macOS 生成带独立图标的 `.app`（Spotlight 毫秒直达），或在 Windows 桌面及开始菜单生成原生快捷方式（`.lnk`，Windows 搜索直达）。
+- ⚡ **零后台常驻与极度轻量**：没有吃内存的常驻守护进程（闲置内存占用 0 MB）。纯 Python 3 驱动，零外部 pip 或 npm 依赖。
 - 🗂️ **环境物理级硬隔离**：每个分身拥有完全独立的插件扩展、本地存储、IndexedDB 与聊天记录，开发环境与主账号互不干扰。
 
 ---
 
 ## 🚀 快速安装
 
-### 1. 一键命令行安装（推荐）
+### 1. macOS 一键命令行安装（推荐）
 
 打开终端直接运行：
 
@@ -33,7 +33,17 @@
 curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash
 ```
 
-### 2. Homebrew 安装（即将推出）
+### 2. Windows 快速上手 (PowerShell / CMD)
+
+克隆仓库并将 `bin` 目录加入环境变量 `PATH`：
+
+```powershell
+git clone https://github.com/edison-land/paragravity.git $HOME\.paragravity
+# 将 $HOME\.paragravity\bin 加入 PATH，随后即可在 CMD 或 PowerShell 直接运行：
+pgrav create work
+```
+
+### 3. Homebrew 安装（即将推出）
 
 ```bash
 brew tap edison-land/tap
