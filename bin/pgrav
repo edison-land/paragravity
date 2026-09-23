@@ -1,1 +1,3 @@
-paragravity
+#!/usr/bin/env sh
+DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
+exec "$DIR/paragravity" "$@"
