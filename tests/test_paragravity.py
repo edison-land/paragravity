@@ -86,7 +86,8 @@ def sandbox_home():
 def run_cli(args, env, stdin=subprocess.DEVNULL):
     return subprocess.run(
         [sys.executable, str(CLI), *args],
-        env=env, stdin=stdin, capture_output=True, text=True, timeout=120,
+        env=env, stdin=stdin, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=120,
     )
 
 
@@ -161,7 +162,7 @@ class BasicLifecycleTests(unittest.TestCase):
 
             listed = run_cli(["list"], env)
             self.assertEqual(listed.returncode, 0)
-            self.assertIn("zwe", listed.stdout)
+            self.assertIn("zwe", listed.stdout or "")
 
             info = run_cli(["info", "zwe"], env)
             self.assertIn("Profile: zwe", info.stdout)
@@ -435,8 +436,9 @@ class NewFeatureTests(unittest.TestCase):
             p_home = profiles / "nonep" / "home"
             self.assertFalse((p_home / ".ssh").exists(), "'none' must not link ~/.ssh")
             self.assertFalse((p_home / "Projects").exists(), "'none' must not link project dirs")
-            self.assertTrue((p_home / "Library" / "Keychains").exists(),
-                            "keychain bridge must stay for Chromium cookie crypto")
+            if IS_DARWIN:
+                self.assertTrue((p_home / "Library" / "Keychains").exists(),
+                                "keychain bridge must stay for Chromium cookie crypto")
 
             self.assertEqual(run_cli(["create", "minp", "--links", "minimal"], env).returncode, 0)
             m_home = profiles / "minp" / "home"
@@ -475,7 +477,10 @@ class ConfigurationInheritanceTests(unittest.TestCase):
     """Tests for profile configuration inheritance (-i) and cloning (--clone-from)."""
 
     def _setup_host_env(self, home: Path):
-        app_support = home / "Library" / "Application Support" / "Antigravity" / "User"
+        if IS_WINDOWS:
+            app_support = home / "AppData" / "Roaming" / "Antigravity" / "User"
+        else:
+            app_support = home / "Library" / "Application Support" / "Antigravity" / "User"
         app_support.mkdir(parents=True, exist_ok=True)
         (app_support / "settings.json").write_text(json.dumps({"editor.fontSize": 14, "workbench.colorTheme": "Dark"}))
         (app_support / "keybindings.json").write_text(json.dumps([{"key": "cmd+k", "command": "workbench.action.terminal"}]))
@@ -549,7 +554,7 @@ class ConfigurationInheritanceTests(unittest.TestCase):
 
             # 6. Skills symlinked
             skills = work_dir / "home" / ".gemini" / "config" / "skills"
-            self.assertTrue(skills.is_symlink())
+            self.assertTrue(skills.is_symlink() or (IS_WINDOWS and skills.is_dir()))
             self.assertTrue((skills / "custom-skill" / "SKILL.md").is_file())
 
             # 7. Metadata and info inspection

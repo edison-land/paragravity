@@ -37,6 +37,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Run test suite
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: python -m unittest discover -s tests -v
 
   shellcheck:

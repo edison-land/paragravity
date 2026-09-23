@@ -247,9 +247,16 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
     # Fallback to process search
     if IS_WINDOWS:
         try:
-            ps_cmd = f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*--user-data-dir={data_dir.resolve()}*' }} | Select-Object -ExpandProperty ProcessId"
-            out = subprocess.check_output(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd], stderr=subprocess.DEVNULL)
-            pids = [int(p) for p in out.decode().split() if p.strip().isdigit()]
+            ps_cmd = (
+                f"Get-CimInstance Win32_Process | "
+                f"Where-Object {{ $_.ProcessId -ne $PID -and $_.Name -notlike '*powershell*' -and $_.Name -notlike '*pwsh*' -and $_.CommandLine -like '*--user-data-dir={data_dir.resolve()}*' }} | "
+                f"Select-Object -ExpandProperty ProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                stderr=subprocess.DEVNULL
+            )
+            pids = [int(p) for p in out.decode("utf-8", "replace").split() if p.strip().isdigit()]
             if pids:
                 return pids[0]
         except Exception:
@@ -367,7 +374,11 @@ def setup_profile_inheritance(
         src_root = real_home
         src_home = real_home
         src_gemini = real_home / ".gemini"
-        src_app_support = real_home / "Library" / "Application Support" / "Antigravity"
+        if IS_WINDOWS:
+            appdata = os.environ.get("APPDATA")
+            src_app_support = (Path(appdata) / "Antigravity") if appdata else (real_home / "AppData" / "Roaming" / "Antigravity")
+        else:
+            src_app_support = real_home / "Library" / "Application Support" / "Antigravity"
         source_is_profile = False
     else:
         validate_profile_name(source)
@@ -409,8 +420,8 @@ def setup_profile_inheritance(
         try:
             if not src_file.is_file() or src_file.is_symlink():
                 return False
-            # Ensure resolved path is within allowed source root
-            if not _is_path_safe(src_file, src_root):
+            # Ensure resolved path is within allowed source root or app support root
+            if not _is_path_safe(src_file, src_root) and not _is_path_safe(src_file, src_app_support):
                 return False
             dst_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_file, dst_file)
@@ -424,7 +435,7 @@ def setup_profile_inheritance(
         try:
             if not src_d.is_dir() or src_d.is_symlink():
                 return False
-            if not _is_path_safe(src_d, src_root):
+            if not _is_path_safe(src_d, src_root) and not _is_path_safe(src_d, src_app_support):
                 return False
             dst_d.mkdir(parents=True, exist_ok=True)
             os.chmod(dst_d, 0o700)
@@ -931,6 +942,9 @@ def cmd_launch(args):
     ]
     if workspace:
         cmd.append(str(workspace))
+
+    if IS_WINDOWS and (str(app_bin).lower().endswith(".cmd") or str(app_bin).lower().endswith(".bat")):
+        cmd = ["cmd.exe", "/c", *cmd]
 
     print(f"{COLOR_CYAN}Launching Antigravity for profile '{COLOR_BOLD}{name}{COLOR_RESET}{COLOR_CYAN}'...{COLOR_RESET}")
     print(f"  • User Data: {data_dir}")
