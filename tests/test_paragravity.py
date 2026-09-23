@@ -40,11 +40,23 @@ def load_cli_module():
 
 
 def pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
     try:
         os.kill(pid, 0)
         return True
     except OSError:
-        return False
+        pass
+    if IS_WINDOWS:
+        try:
+            res = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True
+            )
+            return str(pid) in res.stdout
+        except Exception:
+            pass
+    return False
 
 
 def wait_until(predicate, timeout: float = 10.0, interval: float = 0.1) -> bool:
@@ -62,7 +74,12 @@ def sandbox_home():
         home = Path(tmp)
         env = os.environ.copy()
         env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+        env["APPDATA"] = str(home / "AppData" / "Roaming")
         env["PARAGRAVITY_PROFILES_DIR"] = str(home / ".antigravity-profiles")
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         yield home, env
 
 
