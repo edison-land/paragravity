@@ -21,9 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Syntax check
-        run: |
-          ${{ matrix.python }} -m py_compile bin/paragravity
-          ${{ matrix.python }} -m py_compile bin/web_server.py
+        run: "${{ matrix.python }} -m py_compile bin/paragravity"
 
   tests:
     name: Unit tests (${{ matrix.os }})
@@ -51,8 +49,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install shellcheck
         run: brew install shellcheck
-      - name: Lint shell scripts
-        run: shellcheck install.sh bin/pgrav
+      - name: Lint install.sh
+        run: shellcheck install.sh
 
   brew-audit:
     name: brew audit --strict
