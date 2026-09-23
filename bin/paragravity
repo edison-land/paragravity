@@ -1240,6 +1240,19 @@ def cmd_logs(args):
     except KeyboardInterrupt:
         print()
 
+def cmd_web(args):
+    """Start the modern Web Console & lightweight Widget HUD."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from web_server import start_server
+    except ImportError:
+        print(f"{COLOR_RED}Error: web_server module not found.{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
+    port = getattr(args, "port", 3888)
+    no_browser = getattr(args, "no_browser", False)
+    widget_mode = getattr(args, "widget", False) or getattr(args, "command", "") == "widget"
+    start_server(port=port, open_browser=not no_browser, widget_mode=widget_mode)
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -1333,6 +1346,13 @@ def main():
     p_logs.add_argument("-f", "--follow", action="store_true", help="Keep streaming new output")
     p_logs.add_argument("-n", "--lines", type=int, default=50, help="Number of trailing lines to show (default 50)")
     p_logs.set_defaults(func=cmd_logs)
+
+    # web / ui / widget
+    p_web = subparsers.add_parser("web", aliases=["ui", "widget"], help="Launch modern Web Console or compact widget HUD")
+    p_web.add_argument("-p", "--port", type=int, default=3888, help="Port to listen on (default: 3888)")
+    p_web.add_argument("-w", "--widget", action="store_true", help="Launch compact floating widget view directly")
+    p_web.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    p_web.set_defaults(func=cmd_web)
 
     if len(sys.argv) == 1:
         cmd_list(None)

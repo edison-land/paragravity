@@ -149,6 +149,21 @@ pgrav info zwe
 pgrav delete zwe
 ```
 
+### 8. Modern Web Console & Floating Widget
+Manage all your instances visually with zero dependencies:
+```bash
+# Launch full Web Console (Matrix grid, batch controls, macOS window tiling)
+pgrav web
+# or simply:
+pgrav ui
+
+# Launch compact floating widget HUD
+pgrav widget
+# or:
+pgrav ui --widget
+```
+*Tip: Visit `http://127.0.0.1:3888` for the full console or `http://127.0.0.1:3888/widget` for the compact HUD view.*
+
 ---
 
 ## 🗑️ Uninstall
@@ -212,6 +227,15 @@ Contributions are warmly welcomed! Please feel free to submit an Issue or Pull R
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+---
+
+## 👥 Contributors
+
+Huge thanks to the contributors who helped shape ParaGravity:
+
+- [@Kimberlying](https://github.com/Kimberlying) (Kimberly Qian) — Modern Web Console UI, dynamic multi-instance matrix layout, and batch launch dock.
+- [@realdahuang](https://github.com/realdahuang) — Threat model auditing, configuration inheritance security design, and Windows cross-platform architecture.
 
 ---
 
