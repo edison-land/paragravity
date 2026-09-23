@@ -215,21 +215,34 @@ def pad_visible(text: str, width: int) -> str:
 def is_pid_running(pid: int) -> bool:
     if pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError, SystemError):
-        pass
     if IS_WINDOWS:
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+            if handle:
+                exit_code = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                kernel32.CloseHandle(handle)
+                return exit_code.value == 259
+        except Exception:
+            pass
         try:
             res = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
-            return str(pid) in res.stdout
+            return str(pid) in (res.stdout or "")
         except Exception:
-            pass
-    return False
+            return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError, SystemError):
+            return False
 
 def get_profile_process(profile_name: Path, data_dir: Path) -> int:
     """Check if Antigravity is running with this profile's data_dir."""
@@ -414,6 +427,13 @@ def setup_profile_inheritance(
             resolved.relative_to(allowed_root.resolve())
             return True
         except (ValueError, OSError):
+            if IS_WINDOWS:
+                try:
+                    p_str = os.path.normcase(os.path.realpath(str(p)))
+                    root_str = os.path.normcase(os.path.realpath(str(allowed_root)))
+                    return p_str == root_str or p_str.startswith(root_str.rstrip("\\/") + "\\")
+                except Exception:
+                    pass
             return False
 
     def _safe_copy(src_file: Path, dst_file: Path) -> bool:
@@ -459,7 +479,7 @@ def setup_profile_inheritance(
             resolved = src_d.resolve()
             # If src_d is within source root
             if _is_path_safe(src_d, src_root):
-                if (source_is_profile or IS_WINDOWS) and not src_d.is_symlink():
+                if source_is_profile and not src_d.is_symlink():
                     return _safe_copy_dir(src_d, dst_d)
                 if dst_d.exists() or dst_d.is_symlink():
                     return False
@@ -467,7 +487,7 @@ def setup_profile_inheritance(
                 if create_symlink_or_junction(src_d, dst_d):
                     report["dirs_linked"].append(dst_d.name)
                     return True
-                return False
+                return _safe_copy_dir(src_d, dst_d)
             # If src_d is a symlink pointing into real home (e.g. host skills)
             elif _is_path_safe(resolved, real_home):
                 if dst_d.exists() or dst_d.is_symlink():

@@ -42,18 +42,49 @@ def load_cli_module():
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        pass
     if IS_WINDOWS:
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+            if handle:
+                exit_code = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                kernel32.CloseHandle(handle)
+                return exit_code.value == 259
+        except Exception:
+            pass
         try:
             res = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
             )
-            return str(pid) in res.stdout
+            return str(pid) in (res.stdout or "")
+        except Exception:
+            pass
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError, SystemError):
+        return False
+
+
+def is_link_or_junction(p: Path) -> bool:
+    if p.is_symlink():
+        return True
+    if IS_WINDOWS:
+        if hasattr(os.path, "isjunction") and os.path.isjunction(p):
+            return True
+        try:
+            return bool(os.readlink(p))
+        except (OSError, ValueError):
+            pass
+        try:
+            import stat
+            return bool(p.stat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
         except Exception:
             pass
     return False
@@ -444,11 +475,11 @@ class NewFeatureTests(unittest.TestCase):
             m_home = profiles / "minp" / "home"
             self.assertFalse((m_home / ".ssh").exists(), "'minimal' must not link ~/.ssh")
             self.assertFalse((m_home / ".config").exists(), "'minimal' must not link ~/.config")
-            self.assertTrue((m_home / "Projects").is_symlink(), "'minimal' keeps project dirs")
+            self.assertTrue(is_link_or_junction(m_home / "Projects"), "'minimal' keeps project dirs")
 
             self.assertEqual(run_cli(["create", "fullp"], env).returncode, 0)
             f_home = profiles / "fullp" / "home"
-            self.assertTrue((f_home / ".ssh").is_symlink(), "default policy is 'full'")
+            self.assertTrue(is_link_or_junction(f_home / ".ssh"), "default policy is 'full'")
 
     def test_token_expiry_state_classification(self):
         module = load_cli_module()
@@ -554,7 +585,7 @@ class ConfigurationInheritanceTests(unittest.TestCase):
 
             # 6. Skills symlinked
             skills = work_dir / "home" / ".gemini" / "config" / "skills"
-            self.assertTrue(skills.is_symlink() or (IS_WINDOWS and skills.is_dir()))
+            self.assertTrue(is_link_or_junction(skills))
             self.assertTrue((skills / "custom-skill" / "SKILL.md").is_file())
 
             # 7. Metadata and info inspection
