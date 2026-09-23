@@ -21,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = REPO_ROOT / "bin" / "paragravity"
 IS_DARWIN = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
 
 # Names that must be rejected by validate_profile_name (command injection,
 # path traversal, glob/glob-metachar abuse).
@@ -39,11 +40,54 @@ def load_cli_module():
 
 
 def pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
+            if handle:
+                exit_code = ctypes.c_ulong()
+                kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                kernel32.CloseHandle(handle)
+                return exit_code.value == 259
+        except Exception:
+            pass
+        try:
+            res = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+            return str(pid) in (res.stdout or "")
+        except Exception:
+            pass
+        return False
     try:
         os.kill(pid, 0)
         return True
-    except OSError:
+    except (OSError, ProcessLookupError, SystemError):
         return False
+
+
+def is_link_or_junction(p: Path) -> bool:
+    if p.is_symlink():
+        return True
+    if IS_WINDOWS:
+        if hasattr(os.path, "isjunction") and os.path.isjunction(p):
+            return True
+        try:
+            return bool(os.readlink(p))
+        except (OSError, ValueError):
+            pass
+        try:
+            import stat
+            return bool(p.stat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        except Exception:
+            pass
+    return False
 
 
 def wait_until(predicate, timeout: float = 10.0, interval: float = 0.1) -> bool:
@@ -61,14 +105,20 @@ def sandbox_home():
         home = Path(tmp)
         env = os.environ.copy()
         env["HOME"] = str(home)
+        env["USERPROFILE"] = str(home)
+        env["LOCALAPPDATA"] = str(home / "AppData" / "Local")
+        env["APPDATA"] = str(home / "AppData" / "Roaming")
         env["PARAGRAVITY_PROFILES_DIR"] = str(home / ".antigravity-profiles")
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         yield home, env
 
 
 def run_cli(args, env, stdin=subprocess.DEVNULL):
     return subprocess.run(
         [sys.executable, str(CLI), *args],
-        env=env, stdin=stdin, capture_output=True, text=True, timeout=120,
+        env=env, stdin=stdin, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=120,
     )
 
 
@@ -143,7 +193,7 @@ class BasicLifecycleTests(unittest.TestCase):
 
             listed = run_cli(["list"], env)
             self.assertEqual(listed.returncode, 0)
-            self.assertIn("zwe", listed.stdout)
+            self.assertIn("zwe", listed.stdout or "")
 
             info = run_cli(["info", "zwe"], env)
             self.assertIn("Profile: zwe", info.stdout)
@@ -250,9 +300,13 @@ class ProcessManagementTests(unittest.TestCase):
     def test_delete_refuses_while_running(self):
         with sandbox_home() as (home, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
-            fake = home / "fake-antigravity"
-            fake.write_text("#!/bin/sh\nsleep 300\n")
-            fake.chmod(0o755)
+            if IS_WINDOWS:
+                fake = home / "fake-antigravity.cmd"
+                fake.write_text("@echo off\nping 127.0.0.1 -n 300 > nul\n")
+            else:
+                fake = home / "fake-antigravity"
+                fake.write_text("#!/bin/sh\nsleep 300\n")
+                fake.chmod(0o755)
 
             self.assertEqual(run_cli(["create", "grp"], env).returncode, 0)
             self.assertEqual(run_cli(["launch", "grp", "--app", str(fake)], env).returncode, 0)
@@ -334,9 +388,13 @@ class NewFeatureTests(unittest.TestCase):
     """Logs, workspace path, --json, --links and token-expiry features."""
 
     def _make_echoing_app(self, home: Path) -> Path:
-        fake = home / "fake-antigravity"
-        fake.write_text("#!/bin/sh\necho fake-app-started\necho booting-language-server\nsleep 300\n")
-        fake.chmod(0o755)
+        if IS_WINDOWS:
+            fake = home / "fake-antigravity.cmd"
+            fake.write_text("@echo off\necho fake-app-started\necho booting-language-server\nping 127.0.0.1 -n 300 > nul\n")
+        else:
+            fake = home / "fake-antigravity"
+            fake.write_text("#!/bin/sh\necho fake-app-started\necho booting-language-server\nsleep 300\n")
+            fake.chmod(0o755)
         return fake
 
     def test_launch_writes_log_and_logs_command_reads_it(self):
@@ -409,18 +467,19 @@ class NewFeatureTests(unittest.TestCase):
             p_home = profiles / "nonep" / "home"
             self.assertFalse((p_home / ".ssh").exists(), "'none' must not link ~/.ssh")
             self.assertFalse((p_home / "Projects").exists(), "'none' must not link project dirs")
-            self.assertTrue((p_home / "Library" / "Keychains").exists(),
-                            "keychain bridge must stay for Chromium cookie crypto")
+            if IS_DARWIN:
+                self.assertTrue((p_home / "Library" / "Keychains").exists(),
+                                "keychain bridge must stay for Chromium cookie crypto")
 
             self.assertEqual(run_cli(["create", "minp", "--links", "minimal"], env).returncode, 0)
             m_home = profiles / "minp" / "home"
             self.assertFalse((m_home / ".ssh").exists(), "'minimal' must not link ~/.ssh")
             self.assertFalse((m_home / ".config").exists(), "'minimal' must not link ~/.config")
-            self.assertTrue((m_home / "Projects").is_symlink(), "'minimal' keeps project dirs")
+            self.assertTrue(is_link_or_junction(m_home / "Projects"), "'minimal' keeps project dirs")
 
             self.assertEqual(run_cli(["create", "fullp"], env).returncode, 0)
             f_home = profiles / "fullp" / "home"
-            self.assertTrue((f_home / ".ssh").is_symlink(), "default policy is 'full'")
+            self.assertTrue(is_link_or_junction(f_home / ".ssh"), "default policy is 'full'")
 
     def test_token_expiry_state_classification(self):
         module = load_cli_module()
@@ -435,6 +494,7 @@ class NewFeatureTests(unittest.TestCase):
 
 class PermissionTests(unittest.TestCase):
 
+    @unittest.skipIf(IS_WINDOWS, "POSIX 0700 file modes are not applicable to Windows NTFS")
     def test_profile_dirs_are_owner_only(self):
         with sandbox_home() as (_, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
@@ -448,7 +508,10 @@ class ConfigurationInheritanceTests(unittest.TestCase):
     """Tests for profile configuration inheritance (-i) and cloning (--clone-from)."""
 
     def _setup_host_env(self, home: Path):
-        app_support = home / "Library" / "Application Support" / "Antigravity" / "User"
+        if IS_WINDOWS:
+            app_support = home / "AppData" / "Roaming" / "Antigravity" / "User"
+        else:
+            app_support = home / "Library" / "Application Support" / "Antigravity" / "User"
         app_support.mkdir(parents=True, exist_ok=True)
         (app_support / "settings.json").write_text(json.dumps({"editor.fontSize": 14, "workbench.colorTheme": "Dark"}))
         (app_support / "keybindings.json").write_text(json.dumps([{"key": "cmd+k", "command": "workbench.action.terminal"}]))
@@ -522,7 +585,7 @@ class ConfigurationInheritanceTests(unittest.TestCase):
 
             # 6. Skills symlinked
             skills = work_dir / "home" / ".gemini" / "config" / "skills"
-            self.assertTrue(skills.is_symlink())
+            self.assertTrue(is_link_or_junction(skills))
             self.assertTrue((skills / "custom-skill" / "SKILL.md").is_file())
 
             # 7. Metadata and info inspection
@@ -603,6 +666,8 @@ class ConfigurationInheritanceTests(unittest.TestCase):
             self.assertNotIn("mcpServers", gemini_s)
 
     def test_security_symlink_attack_rejection(self):
+        if IS_WINDOWS:
+            self.skipTest("Symlink attack testing requires elevation or Developer Mode on Windows")
         with sandbox_home() as (home, env):
             profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
             canary = home / "secret_host_canary.txt"

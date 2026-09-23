@@ -24,12 +24,23 @@ jobs:
         run: "${{ matrix.python }} -m py_compile bin/paragravity"
 
   tests:
-    name: Unit tests
-    runs-on: macos-latest
+    name: Unit tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Run test suite
-        run: python3 -m unittest discover -s tests -v
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python -m unittest discover -s tests -v
 
   shellcheck:
     name: shellcheck

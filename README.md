@@ -1,12 +1,12 @@
 # 🌌 ParaGravity (`pgrav`)
 
 > **Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity.**  
-> Run multiple Google Gemini Pro accounts side-by-side in independent, isolated windows on macOS.
+> Run multiple Google Gemini Pro accounts side-by-side in independent, isolated windows on macOS and Windows.
 
 English | [简体中文](README_zh.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Platform: macOS](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)]()
+[![Platform: macOS | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey.svg)]()
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-yellow.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
 
@@ -17,21 +17,31 @@ English | [简体中文](README_zh.md)
 - 🚀 **True Parallel Concurrency**: Run multiple Google Gemini Pro accounts side-by-side in separate windows simultaneously without restarting or session switching.
 - 🛡️ **100% Non-Invasive**: Built strictly on Chromium/Electron's official `--user-data-dir` sandboxing. Zero binary patching, zero internal database modifications, zero account security risks.
 - 🔑 **Native Google OAuth**: Complete, untouched Google Cloud authentication flow. Token refresh and sign-in redirects work seamlessly without proxies or interruptions.
-- 🔍 **macOS Native Integration**: Automatically generates independent macOS `.app` bundles with app icons. Launch your instances directly via **Spotlight (`Cmd + Space`)** or Dock.
-- ⚡ **Zero-Footprint & Ultra-Lightweight**: No background daemon eating RAM (0 MB idle overhead). Powered purely by Python 3 with zero external pip or npm dependencies. (macOS provides `python3` through the Xcode Command Line Tools — run `xcode-select --install` if it's missing; any Python ≥ 3.8 on your `PATH` works too.)
+- 🔍 **Native Desktop Integration**: Automatically generates independent macOS `.app` bundles (indexed by Spotlight) or Windows Desktop & Start Menu shortcuts (`.lnk`). Launch your instances directly via **Spotlight (`Cmd + Space`)** or **Windows Search (`Win + S`)**.
+- ⚡ **Zero-Footprint & Ultra-Lightweight**: No background daemon eating RAM (0 MB idle overhead). Powered purely by Python 3 with zero external pip or npm dependencies.
 - 🗂️ **Total Workspace Isolation**: Each instance maintains completely separated extensions, local storage, indexedDB, and chat histories, preventing workspace contamination.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. One-Line Install (Recommended)
+### 1. macOS One-Line Install (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash
 ```
 
-### 2. Homebrew Tap (Coming Soon)
+### 2. Windows Quick Start (PowerShell / CMD)
+
+Clone the repository and add the `bin` directory to your user `PATH`:
+
+```powershell
+git clone https://github.com/edison-land/paragravity.git $HOME\.paragravity
+# Add $HOME\.paragravity\bin to PATH, then use:
+pgrav create work
+```
+
+### 3. Homebrew Tap (Coming Soon)
 
 ```bash
 brew tap edison-land/tap
