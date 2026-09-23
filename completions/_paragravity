@@ -41,7 +41,18 @@ _paragravity() {
                     _paragravity_profiles
                     ;;
                 create)
-                    _message 'profile name'
+                    if [[ ${words[CURRENT-1]} == "--clone-from" ]]; then
+                        _paragravity_profiles
+                    else
+                        _arguments \
+                            '(-d --description)'{-d,--description}'[Short description]:description:' \
+                            '(-l --launch)'{-l,--launch}'[Launch immediately after creation]' \
+                            '(-i --inherit-config)'{-i,--inherit-config}'[Inherit settings/skills/MCP from host]' \
+                            '--clone-from[Clone settings from existing profile]:profile:_paragravity_profiles' \
+                            '--no-mcp[Do not inherit MCP tool configuration]' \
+                            '--links[Symlink policy]:policy:(full minimal none)' \
+                            '1:profile name:'
+                    fi
                     ;;
             esac
             ;;

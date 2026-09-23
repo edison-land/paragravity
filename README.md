@@ -65,6 +65,26 @@ pgrav create work --links minimal   # link git/shell configs and project dirs, s
 pgrav create work --links none      # link almost nothing (keychain bridge only)
 ```
 
+#### Inherit or Clone Configuration (No More Blank Canvas!)
+New profiles start clean, but you often want your custom keybindings, editor settings, snippets, agent skills, or MCP tools without having to re-configure them.
+
+- **Inherit from host**: Copy settings and snippets, link skills & MCP tools from your host environment:
+  ```bash
+  pgrav create work -i
+  # or
+  pgrav create work --inherit-config
+  ```
+- **Clone from an existing profile**: Deep-copy configurations from another profile into a self-contained clone (independent lifecycle):
+  ```bash
+  pgrav create work2 --clone-from work
+  ```
+- **Exclude MCP tools**: Skip MCP tools inheritance if you prefer a clean tool slate:
+  ```bash
+  pgrav create work -i --no-mcp
+  ```
+
+> 🔒 **Security Guarantee**: Strict credential and session isolation. OAuth tokens (`jetski-standalone-oauth-token`, `oauth_creds.json`), Google account IDs, cookies, local storage, and conversation histories are **NEVER** copied or inherited. All profiles are created with owner-only (`0700`/`0600`) permissions.
+
 ### 2. List All Profiles & Status
 View all your parallel instances, live process status, and bound Google accounts:
 ```bash

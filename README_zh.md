@@ -67,6 +67,26 @@ pgrav create work --links minimal   # 链接 git/shell 配置和常用项目目�
 pgrav create work --links none      # 几乎不链接任何真实目录（仅保留钥匙串桥接）
 ```
 
+#### 配置继承与克隆（解决新实例“纯白板”痛点）
+新建的分身默认是纯白板，但开发往往希望保留熟悉的代码片段、快捷键、主题偏好、Agent 技能（Skills）或 MCP 插件工具：
+
+- **从宿主环境继承**：自动复制编辑器偏好、快捷键与代码片段，软链继承宿主 Agent 技能与 MCP 工具：
+  ```bash
+  pgrav create work -i
+  # 或完整参数
+  pgrav create work --inherit-config
+  ```
+- **从已有分身克隆**：深度独立克隆已有分身的完整配置，生命周期互不干扰：
+  ```bash
+  pgrav create work2 --clone-from work
+  ```
+- **选择性跳过 MCP 工具**：若需要纯净的 MCP 工具环境：
+  ```bash
+  pgrav create work -i --no-mcp
+  ```
+
+> 🔒 **安全隔离保证**：配置继承遵循严格白名单与深度隔离原则。OAuth Token（`jetski-standalone-oauth-token`、`oauth_creds.json`）、Google 账号信息、会话 Cookie、本地存储、历史对话库（`conversation_summaries.db*`、`brain/`）**绝不复制/共享**。所有分身目录均受 `0700/0600` 严格所有者权限防护。
+
 ### 2. 查看所有分身状态
 查看所有分身、当前进程运行状态、以及绑定的 Google 账号：
 ```bash

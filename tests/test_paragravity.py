@@ -444,5 +444,190 @@ class PermissionTests(unittest.TestCase):
                 self.assertEqual(mode, 0o700, f"{d} must not be group/world readable")
 
 
+class ConfigurationInheritanceTests(unittest.TestCase):
+    """Tests for profile configuration inheritance (-i) and cloning (--clone-from)."""
+
+    def _setup_host_env(self, home: Path):
+        app_support = home / "Library" / "Application Support" / "Antigravity" / "User"
+        app_support.mkdir(parents=True, exist_ok=True)
+        (app_support / "settings.json").write_text(json.dumps({"editor.fontSize": 14, "workbench.colorTheme": "Dark"}))
+        (app_support / "keybindings.json").write_text(json.dumps([{"key": "cmd+k", "command": "workbench.action.terminal"}]))
+        snip_dir = app_support / "snippets"
+        snip_dir.mkdir(parents=True, exist_ok=True)
+        (snip_dir / "python.json").write_text(json.dumps({"header": {"prefix": "hdr", "body": "#!/usr/bin/env python3"}}))
+
+        gemini = home / ".gemini"
+        gemini.mkdir(parents=True, exist_ok=True)
+        (gemini / "settings.json").write_text(json.dumps({
+            "theme": "Atom One",
+            "selectedAuthType": "oauth-personal",
+            "jetski-standalone-oauth-token": "SECRET_HOST_TOKEN_DO_NOT_LEAK",
+            "google_accounts": [{"email": "host@gmail.com"}],
+            "lastLoginUsername": "host@gmail.com",
+            "mcpServers": {"pencil": {"command": "pencil-mcp"}}
+        }))
+        (gemini / "jetski-standalone-oauth-token").write_text("RAW_BEARER_TOKEN_HOST")
+
+        gemini_cfg = gemini / "config"
+        gemini_cfg.mkdir(parents=True, exist_ok=True)
+        (gemini_cfg / "config.json").write_text(json.dumps({
+            "userSettings": {
+                "artifactReviewMode": "ARTIFACT_REVIEW_MODE_TURBO",
+                "remoteControlHostname": "host-machine-private"
+            }
+        }))
+        (gemini_cfg / "mcp_config.json").write_text(json.dumps({
+            "mcpServers": {"pencil": {"command": "pencil-mcp"}}
+        }))
+
+        skills_dir = gemini_cfg / "skills" / "custom-skill"
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        (skills_dir / "SKILL.md").write_text("# Custom Skill\nDescription")
+
+    def test_inherit_config_from_host_success(self):
+        with sandbox_home() as (home, env):
+            self._setup_host_env(home)
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+
+            res = run_cli(["create", "work", "-i"], env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("Inherited:", res.stdout)
+            self.assertIn("Credentials & session tokens isolated", res.stdout)
+
+            work_dir = profiles / "work"
+            # 1. VSCode / Antigravity User settings copied
+            self.assertTrue((work_dir / "data" / "User" / "settings.json").is_file())
+            self.assertTrue((work_dir / "data" / "User" / "keybindings.json").is_file())
+            self.assertTrue((work_dir / "data" / "User" / "snippets" / "python.json").is_file())
+
+            # 2. Antigravity settings sanitized (tokens removed)
+            gemini_s = work_dir / "home" / ".gemini" / "settings.json"
+            self.assertTrue(gemini_s.is_file())
+            data = json.loads(gemini_s.read_text())
+            self.assertEqual(data.get("theme"), "Atom One")
+            self.assertNotIn("jetski-standalone-oauth-token", data)
+            self.assertNotIn("google_accounts", data)
+            self.assertNotIn("lastLoginUsername", data)
+
+            # 3. Raw token file MUST NOT exist
+            self.assertFalse((work_dir / "home" / ".gemini" / "jetski-standalone-oauth-token").exists())
+
+            # 4. config.json sanitized
+            cfg = json.loads((work_dir / "home" / ".gemini" / "config" / "config.json").read_text())
+            self.assertEqual(cfg["userSettings"]["artifactReviewMode"], "ARTIFACT_REVIEW_MODE_TURBO")
+            self.assertNotIn("remoteControlHostname", cfg["userSettings"])
+
+            # 5. MCP tool configs inherited
+            self.assertTrue((work_dir / "home" / ".gemini" / "config" / "mcp_config.json").is_file())
+
+            # 6. Skills symlinked
+            skills = work_dir / "home" / ".gemini" / "config" / "skills"
+            self.assertTrue(skills.is_symlink())
+            self.assertTrue((skills / "custom-skill" / "SKILL.md").is_file())
+
+            # 7. Metadata and info inspection
+            meta = json.loads((work_dir / "profile.json").read_text())
+            self.assertEqual(meta.get("inherited_from"), "host")
+
+            info = run_cli(["info", "work", "--json"], env)
+            self.assertEqual(info.returncode, 0)
+            self.assertEqual(json.loads(info.stdout).get("inherited_from"), "host")
+
+    def test_clone_from_existing_profile(self):
+        with sandbox_home() as (home, env):
+            self._setup_host_env(home)
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+
+            # Create source profile and customize it
+            self.assertEqual(run_cli(["create", "src_prof", "-i"], env).returncode, 0)
+            src_user = profiles / "src_prof" / "data" / "User"
+            (src_user / "settings.json").write_text(json.dumps({"editor.fontSize": 18}))
+            (src_user / "snippets" / "python.json").write_text(json.dumps({"body": "custom-snippet-v1"}))
+            # Put a fake token inside src_prof to verify it is NOT cloned
+            (profiles / "src_prof" / "home" / ".gemini" / "jetski-standalone-oauth-token").write_text("SRC_TOKEN")
+
+            # Clone to clone_prof
+            res = run_cli(["create", "clone_prof", "--clone-from", "src_prof"], env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+
+            clone_dir = profiles / "clone_prof"
+            self.assertTrue((clone_dir / "data" / "User" / "settings.json").is_file())
+            clone_settings = json.loads((clone_dir / "data" / "User" / "settings.json").read_text())
+            self.assertEqual(clone_settings.get("editor.fontSize"), 18)
+
+            # Verify deep copy isolation: editing clone does not modify source
+            (clone_dir / "data" / "User" / "snippets" / "python.json").write_text(json.dumps({"body": "clone-snippet-modified"}))
+            src_snip = json.loads((src_user / "snippets" / "python.json").read_text())
+            self.assertEqual(src_snip.get("body"), "custom-snippet-v1", "source profile snippet must remain unchanged")
+
+            # Verify credentials are NOT cloned
+            self.assertFalse((clone_dir / "home" / ".gemini" / "jetski-standalone-oauth-token").exists())
+
+            # Verify profile metadata
+            meta = json.loads((clone_dir / "profile.json").read_text())
+            self.assertEqual(meta.get("inherited_from"), "src_prof")
+
+    def test_mutual_exclusion_inherit_and_clone(self):
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "p1"], env).returncode, 0)
+            res = run_cli(["create", "p2", "-i", "--clone-from", "p1"], env)
+            self.assertEqual(res.returncode, 1)
+            self.assertIn("Cannot specify both --inherit-config and --clone-from", res.stderr + res.stdout)
+
+    def test_clone_from_nonexistent_and_self(self):
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "p1"], env).returncode, 0)
+            res_self = run_cli(["create", "p1", "--clone-from", "p1"], env)
+            # Fails either because profile already exists or cannot clone from itself
+            self.assertNotEqual(res_self.returncode, 0)
+
+            res_self2 = run_cli(["create", "new_p", "--clone-from", "new_p"], env)
+            self.assertEqual(res_self2.returncode, 1)
+            self.assertIn("Cannot clone a profile from itself", res_self2.stderr + res_self2.stdout)
+
+            res_ghost = run_cli(["create", "new_p2", "--clone-from", "ghost_prof"], env)
+            self.assertEqual(res_ghost.returncode, 1)
+            self.assertIn("does not exist", res_ghost.stderr + res_ghost.stdout)
+
+    def test_no_mcp_flag(self):
+        with sandbox_home() as (home, env):
+            self._setup_host_env(home)
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+
+            res = run_cli(["create", "nomcp_prof", "-i", "--no-mcp"], env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+
+            nomcp_dir = profiles / "nomcp_prof"
+            self.assertFalse((nomcp_dir / "home" / ".gemini" / "config" / "mcp_config.json").exists())
+            gemini_s = json.loads((nomcp_dir / "home" / ".gemini" / "settings.json").read_text())
+            self.assertNotIn("mcpServers", gemini_s)
+
+    def test_security_symlink_attack_rejection(self):
+        with sandbox_home() as (home, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            canary = home / "secret_host_canary.txt"
+            canary.write_text("CONFIDENTIAL_SYSTEM_DATA")
+
+            self.assertEqual(run_cli(["create", "src_evil"], env).returncode, 0)
+            # Attacker creates a malicious symlink inside source profile pointing outside
+            src_user = profiles / "src_evil" / "data" / "User"
+            src_user.mkdir(parents=True, exist_ok=True)
+            evil_link = src_user / "settings.json"
+            evil_link.symlink_to(canary)
+
+            res = run_cli(["create", "victim_clone", "--clone-from", "src_evil"], env)
+            self.assertEqual(res.returncode, 0)
+
+            victim_settings = profiles / "victim_clone" / "data" / "User" / "settings.json"
+            self.assertFalse(victim_settings.exists(), "malicious symlink must NOT be copied")
+
+    def test_clone_rejects_path_traversal_source_name(self):
+        with sandbox_home() as (_, env):
+            for bad_source in ("..", ".", "../etc", "a/b", "`touch`"):
+                with self.subTest(source=bad_source):
+                    res = run_cli(["create", "victim", "--clone-from", bad_source], env)
+                    self.assertEqual(res.returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

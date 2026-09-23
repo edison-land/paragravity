@@ -7,6 +7,9 @@ Repository: https://github.com/edison-land/paragravity
 License: MIT
 """
 
+from __future__ import annotations
+from typing import Optional
+
 import os
 import sys
 import json
@@ -57,10 +60,18 @@ def prompt_yes_no(message: str, default_no: bool = True) -> bool:
     return answer == "y" if answer else not default_no
 
 def harden_profile_perms(profile_dir: Path, profiles_dir: Path):
-    """Once signed in, a profile holds a plaintext OAuth token file, so keep
-    the profile directories accessible to the owner only."""
+    """Keep profile directories and sensitive files accessible to the owner only (0700/0600)."""
     try:
-        for d in (profiles_dir, profile_dir, profile_dir / "data", profile_dir / "home"):
+        targets = [
+            profiles_dir,
+            profile_dir,
+            profile_dir / "data",
+            profile_dir / "home",
+            profile_dir / "home" / ".gemini",
+            profile_dir / "home" / ".gemini" / "config",
+            profile_dir / "data" / "User",
+        ]
+        for d in targets:
             if d.is_dir():
                 os.chmod(d, 0o700)
     except OSError:
@@ -255,6 +266,209 @@ def setup_home_symlinks(real_home: Path, profile_home: Path, policy: str = "full
         except Exception:
             pass
 
+def setup_profile_inheritance(
+    target_profile_dir: Path,
+    source: str,
+    inherit_mcp: bool = True,
+    inherit_extensions: bool = True
+) -> dict:
+    """
+    Safely inherit or clone non-credential configuration from the host
+    environment (source="host") or an existing profile (source=<profile_name>).
+    Strict allowlist only — OAuth tokens, accounts, session DBs, and conversations
+    are strictly excluded.
+    Returns a dict summarizing what was inherited.
+    """
+    profiles_dir = get_profiles_dir()
+    real_home = Path.home()
+
+    if source == "host":
+        src_root = real_home
+        src_home = real_home
+        src_gemini = real_home / ".gemini"
+        src_app_support = real_home / "Library" / "Application Support" / "Antigravity"
+        source_is_profile = False
+    else:
+        validate_profile_name(source)
+        src_profile_dir = profiles_dir / source
+        if not src_profile_dir.is_dir() or not (src_profile_dir / "profile.json").is_file():
+            raise ValueError(f"Source profile '{source}' does not exist or has no profile.json.")
+        src_root = src_profile_dir
+        src_home = src_profile_dir / "home"
+        src_gemini = src_home / ".gemini"
+        src_data = src_profile_dir / "data"
+        src_app_support = src_data
+        source_is_profile = True
+
+    tgt_home = target_profile_dir / "home"
+    tgt_data = target_profile_dir / "data"
+    tgt_gemini = tgt_home / ".gemini"
+    tgt_gemini_cfg = tgt_gemini / "config"
+
+    tgt_gemini.mkdir(parents=True, exist_ok=True)
+    tgt_gemini_cfg.mkdir(parents=True, exist_ok=True)
+    tgt_data.mkdir(parents=True, exist_ok=True)
+
+    report = {
+        "source": source,
+        "files_copied": [],
+        "dirs_linked": [],
+        "dirs_copied": [],
+    }
+
+    def _is_path_safe(p: Path, allowed_root: Path) -> bool:
+        try:
+            resolved = p.resolve()
+            resolved.relative_to(allowed_root.resolve())
+            return True
+        except (ValueError, OSError):
+            return False
+
+    def _safe_copy(src_file: Path, dst_file: Path) -> bool:
+        try:
+            if not src_file.is_file() or src_file.is_symlink():
+                return False
+            # Ensure resolved path is within allowed source root
+            if not _is_path_safe(src_file, src_root):
+                return False
+            dst_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dst_file)
+            os.chmod(dst_file, 0o600)
+            report["files_copied"].append(dst_file.name)
+            return True
+        except OSError:
+            return False
+
+    def _safe_copy_dir(src_d: Path, dst_d: Path) -> bool:
+        try:
+            if not src_d.is_dir() or src_d.is_symlink():
+                return False
+            if not _is_path_safe(src_d, src_root):
+                return False
+            dst_d.mkdir(parents=True, exist_ok=True)
+            os.chmod(dst_d, 0o700)
+            copied_any = False
+            for item in src_d.iterdir():
+                if item.is_file() and not item.is_symlink():
+                    d_file = dst_d / item.name
+                    shutil.copy2(item, d_file)
+                    os.chmod(d_file, 0o600)
+                    copied_any = True
+            if copied_any:
+                report["dirs_copied"].append(dst_d.name)
+            return copied_any
+        except OSError:
+            return False
+
+    def _safe_link_or_copy_dir(src_d: Path, dst_d: Path) -> bool:
+        try:
+            if not src_d.is_dir():
+                return False
+            resolved = src_d.resolve()
+            # If src_d is within source root
+            if _is_path_safe(src_d, src_root):
+                if source_is_profile and not src_d.is_symlink():
+                    return _safe_copy_dir(src_d, dst_d)
+                if dst_d.exists() or dst_d.is_symlink():
+                    return False
+                dst_d.parent.mkdir(parents=True, exist_ok=True)
+                dst_d.symlink_to(src_d)
+                report["dirs_linked"].append(dst_d.name)
+                return True
+            # If src_d is a symlink pointing into real home (e.g. host skills)
+            elif _is_path_safe(resolved, real_home):
+                if dst_d.exists() or dst_d.is_symlink():
+                    return False
+                dst_d.parent.mkdir(parents=True, exist_ok=True)
+                dst_d.symlink_to(resolved)
+                report["dirs_linked"].append(dst_d.name)
+                return True
+            return False
+        except OSError:
+            return False
+
+    # 1. Antigravity & VSCode User settings (settings.json, keybindings.json, snippets)
+    tgt_user_dir = tgt_data / "User"
+    if not source_is_profile:
+        src_user_dir = src_app_support / "User"
+        if not src_user_dir.is_dir():
+            code_user = real_home / "Library" / "Application Support" / "Code" / "User"
+            if code_user.is_dir():
+                src_user_dir = code_user
+    else:
+        src_user_dir = src_data / "User"
+
+    if src_user_dir.is_dir():
+        _safe_copy(src_user_dir / "settings.json", tgt_user_dir / "settings.json")
+        _safe_copy(src_user_dir / "keybindings.json", tgt_user_dir / "keybindings.json")
+        _safe_copy_dir(src_user_dir / "snippets", tgt_user_dir / "snippets")
+
+    # Target ~/.gemini/settings.json
+    src_gemini_settings = src_gemini / "settings.json"
+    if src_gemini_settings.is_file() and not src_gemini_settings.is_symlink():
+        try:
+            raw = json.loads(src_gemini_settings.read_text(encoding="utf-8"))
+            sensitive_keys = {
+                "jetski-standalone-oauth-token", "google_accounts", "google_account_id",
+                "lastLoginUsername", "oauth_creds", "credentials", "token",
+                "refreshToken", "accessToken"
+            }
+            filtered = {}
+            for k, v in raw.items():
+                k_lower = k.lower()
+                if k in sensitive_keys or "oauth" in k_lower or "token" in k_lower or "secret" in k_lower or "credential" in k_lower:
+                    continue
+                if not inherit_mcp and k == "mcpServers":
+                    continue
+                filtered[k] = v
+            dst_s = tgt_gemini / "settings.json"
+            dst_s.write_text(json.dumps(filtered, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.chmod(dst_s, 0o600)
+            report["files_copied"].append("settings.json")
+        except Exception:
+            pass
+
+    # 2. AI Assistant Configuration (~/.gemini/config/config.json)
+    src_config_json = src_gemini / "config" / "config.json"
+    if src_config_json.is_file() and not src_config_json.is_symlink():
+        try:
+            raw_cfg = json.loads(src_config_json.read_text(encoding="utf-8"))
+            user_settings = raw_cfg.get("userSettings", {})
+            sanitized_user_settings = {
+                k: v for k, v in user_settings.items()
+                if k not in ("remoteControlHostname",)
+            }
+            dst_cfg = tgt_gemini_cfg / "config.json"
+            dst_cfg.write_text(json.dumps({"userSettings": sanitized_user_settings}, indent=2, ensure_ascii=False), encoding="utf-8")
+            os.chmod(dst_cfg, 0o600)
+            report["files_copied"].append("config.json")
+        except Exception:
+            pass
+
+    # 3. MCP tool configurations (mcp_config.json)
+    if inherit_mcp:
+        src_mcp = src_gemini / "config" / "mcp_config.json"
+        if src_mcp.is_file() and not src_mcp.is_symlink():
+            _safe_copy(src_mcp, tgt_gemini_cfg / "mcp_config.json")
+
+    # 4. Agent Skills & Plugins
+    src_skills = src_gemini / "config" / "skills"
+    if src_skills.is_dir():
+        _safe_link_or_copy_dir(src_skills, tgt_gemini_cfg / "skills")
+
+    src_plugins = src_gemini / "config" / "plugins"
+    if src_plugins.is_dir():
+        _safe_link_or_copy_dir(src_plugins, tgt_gemini_cfg / "plugins")
+
+    # 5. Extensions
+    if inherit_extensions:
+        src_ext = (src_home / ".antigravity" / "extensions") if (src_home / ".antigravity" / "extensions").is_dir() else (src_home / ".vscode" / "extensions")
+        if src_ext.is_dir():
+            _safe_link_or_copy_dir(src_ext, tgt_home / ".antigravity" / "extensions")
+
+    harden_profile_perms(target_profile_dir, profiles_dir)
+    return report
+
 def create_macos_app_shortcut(profile_name: str, app_display_name: str = None) -> Path:
     """Create a macOS native .app in ~/Applications so Spotlight and Dock can launch it."""
     if sys.platform != "darwin":
@@ -306,11 +520,31 @@ def cmd_create(args):
     name = args.name.strip()
     validate_profile_name(name)
 
+    # Configuration inheritance & cloning validation BEFORE touching disk
+    inherited_source = None
+    if getattr(args, "clone_from", None) and getattr(args, "inherit_config", False):
+        print(f"{COLOR_RED}Error: Cannot specify both --inherit-config and --clone-from.{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if getattr(args, "clone_from", None):
+        clone_from = args.clone_from.strip()
+        validate_profile_name(clone_from)
+        if clone_from == name:
+            print(f"{COLOR_RED}Error: Cannot clone a profile from itself.{COLOR_RESET}", file=sys.stderr)
+            sys.exit(1)
+        src_profile = profiles_dir / clone_from
+        if not src_profile.is_dir() or not (src_profile / "profile.json").is_file():
+            print(f"{COLOR_RED}Error: Source profile '{clone_from}' does not exist or has no profile.json.{COLOR_RESET}", file=sys.stderr)
+            sys.exit(1)
+        inherited_source = clone_from
+    elif getattr(args, "inherit_config", False):
+        inherited_source = "host"
+
     profile_dir = profiles_dir / name
     if profile_dir.exists():
         harden_profile_perms(profile_dir, profiles_dir)
-        print(f"{COLOR_YELLOW}Profile '{name}' already exists at {profile_dir}{COLOR_RESET}")
-        return
+        print(f"{COLOR_RED}Error: Profile '{name}' already exists at {profile_dir}{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
 
     data_dir = profile_dir / "data"
     home_dir = profile_dir / "home"
@@ -321,11 +555,21 @@ def cmd_create(args):
     # Symlink developer configs from real HOME according to the chosen policy
     setup_home_symlinks(Path.home(), home_dir, args.links)
 
+    inheritance_report = None
+    if inherited_source:
+        inherit_mcp = not getattr(args, "no_mcp", False)
+        inheritance_report = setup_profile_inheritance(
+            profile_dir,
+            source=inherited_source,
+            inherit_mcp=inherit_mcp
+        )
+
     # Create profile metadata
     meta = {
         "name": name,
         "description": args.description or "",
         "symlink_policy": args.links,
+        "inherited_from": inherited_source,
         "created_at": datetime.now().isoformat(),
         "version": 1
     }
@@ -336,6 +580,16 @@ def cmd_create(args):
 
     print(f"{COLOR_GREEN}✓ Profile '{COLOR_BOLD}{name}{COLOR_RESET}{COLOR_GREEN}' created successfully!{COLOR_RESET}")
     print(f"  • Sandbox Dir: {profile_dir}")
+    if inherited_source:
+        source_label = "host environment" if inherited_source == "host" else f"profile '{inherited_source}'"
+        items = []
+        if inheritance_report and inheritance_report.get("files_copied"):
+            items.extend(inheritance_report["files_copied"])
+        if inheritance_report and inheritance_report.get("dirs_linked"):
+            items.extend(inheritance_report["dirs_linked"])
+        items_str = ", ".join(sorted(set(items))) if items else "settings"
+        print(f"  • Inherited:   {COLOR_CYAN}{source_label}{COLOR_RESET} ({items_str})")
+        print(f"  • Security:    {COLOR_GREEN}Credentials & session tokens isolated (0700){COLOR_RESET}")
     if app_path:
         print(f"  • macOS App:   {COLOR_CYAN}{app_path.name}{COLOR_RESET} (Search via Spotlight {COLOR_BOLD}Cmd+Space{COLOR_RESET})")
     print(f"  • CLI Launch:  {COLOR_CYAN}paragravity launch {name}{COLOR_RESET} (or {COLOR_CYAN}pgrav launch {name}{COLOR_RESET})")
@@ -370,6 +624,7 @@ def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
         "token_state": token_expiry_state(acc_info.get("token_exp")),
         "size": get_directory_size(profile_dir) if include_size else None,
         "description": meta.get("description", ""),
+        "inherited_from": meta.get("inherited_from"),
     }
 
 def cmd_list(args):
@@ -658,6 +913,14 @@ def cmd_info(args):
     acc_info = extract_account_info(profile_dir)
     size_str = get_directory_size(profile_dir)
 
+    meta = {}
+    meta_file = profile_dir / "profile.json"
+    if meta_file.is_file():
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            pass
+
     if getattr(args, "json", False):
         print(json.dumps({
             "name": name,
@@ -669,6 +932,8 @@ def cmd_info(args):
             "has_token": acc_info["has_token"],
             "token_exp": acc_info.get("token_exp"),
             "token_state": token_expiry_state(acc_info.get("token_exp")),
+            "inherited_from": meta.get("inherited_from"),
+            "description": meta.get("description", ""),
         }, indent=2, ensure_ascii=False))
         return
 
@@ -676,6 +941,9 @@ def cmd_info(args):
     print(f"Status:       {COLOR_GREEN}Running (PID: {pid}){COLOR_RESET}" if pid else f"Status:       {COLOR_DIM}Stopped{COLOR_RESET}")
     print(f"Directory:    {profile_dir}")
     print(f"Storage Size: {size_str}")
+    if meta.get("inherited_from"):
+        src_label = "host environment" if meta["inherited_from"] == "host" else f"profile '{meta['inherited_from']}'"
+        print(f"Inherited:    {src_label}")
     print(f"Account:      {acc_info['email'] or '(Not signed in)'}")
     print(f"OAuth Token:  {'Active' if acc_info['has_token'] else 'None'}")
     if acc_info.get("token_exp"):
@@ -749,6 +1017,12 @@ def main():
     p_create.add_argument("name", help="Profile name (e.g. zwe, work, personal)")
     p_create.add_argument("-d", "--description", help="Short description")
     p_create.add_argument("-l", "--launch", action="store_true", help="Launch immediately after creation")
+    p_create.add_argument("-i", "--inherit-config", action="store_true",
+                          help="Inherit user settings, keybindings, snippets, skills and MCP config from host environment (credentials/tokens are never copied)")
+    p_create.add_argument("--clone-from", metavar="SOURCE_PROFILE",
+                          help="Clone settings, keybindings, snippets and configs from an existing profile")
+    p_create.add_argument("--no-mcp", action="store_true",
+                          help="Do not inherit MCP tool configuration when using --inherit-config or --clone-from")
     p_create.add_argument("--links", choices=("full", "minimal", "none"), default="full",
                           help="How much of the real HOME to expose inside the profile "
                                "(full links everything incl. ~/.ssh/.config; minimal skips "
