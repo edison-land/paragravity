@@ -121,7 +121,7 @@
 
     /* Scroll presentation components */
     [data-scroll-slide] {
-      will-change: transform, opacity, filter;
+      will-change: transform, opacity;
       transform-origin: center center;
     }
 
@@ -928,191 +928,177 @@
         let rotateZ = 0;
         let scale = 1;
         let opacity = 1;
-        let blur = 0;
 
         switch (type) {
-          // Section 1: Overview - 3D Flight & Symmetrical Docking
+          // Section 1: Overview - 3D Flight & Symmetrical Docking (Zero Blur, Crisp Text)
           case 'split-left':
-            translateX = -160 * signedDist;
-            translateY = 30 * absDist;
-            rotateY = 16 * signedDist;
-            rotateZ = -2.5 * signedDist;
-            scale = 0.85 + 0.15 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 6;
+            translateX = -140 * signedDist;
+            translateY = 25 * absDist;
+            rotateY = 12 * signedDist;
+            rotateZ = -2 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'split-right':
-            translateX = 160 * signedDist;
-            translateY = 30 * absDist;
-            rotateY = -16 * signedDist;
-            rotateZ = 2.5 * signedDist;
-            scale = 0.85 + 0.15 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 6;
+            translateX = 140 * signedDist;
+            translateY = 25 * absDist;
+            rotateY = -12 * signedDist;
+            rotateZ = 2 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'banner-pill':
-            translateY = 40 * signedDist;
-            scale = 0.9 + 0.1 * progress;
-            opacity = Math.min(progress * 1.6, 1);
+            translateY = 30 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           // Section 2: Architecture - Dimension Rift (Pain Sinks vs Solution Soars)
+          // 100% Readable at all times: clear text, gentle 3D depth, ZERO blur
           case 'pain-sink':
-            translateY = -50 * signedDist;
-            translateZ = -180 * absDist;
-            rotateX = 16 * signedDist;
-            scale = 0.82 + 0.18 * progress;
-            opacity = 0.2 + 0.65 * progress;
-            blur = absDist * 5;
+            translateY = -35 * signedDist;
+            translateZ = -90 * absDist;
+            rotateX = 10 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.65 + 0.30 * progress, 0.95);
             break;
 
           case 'solution-soar':
-            translateY = 90 * signedDist;
-            translateZ = 60 * progress;
-            rotateX = -10 * signedDist;
-            scale = 0.86 + 0.16 * progress;
-            opacity = Math.min(progress * 1.6, 1);
-            blur = absDist * 7;
+            translateY = 65 * signedDist;
+            translateZ = 45 * progress;
+            rotateX = -8 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           // Section 3: Agent Setup - Holographic Capsule Expansion
           case 'agent-card':
-            translateY = 70 * signedDist;
-            rotateX = 12 * signedDist;
-            scale = 0.84 + 0.16 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 6;
+            translateY = 55 * signedDist;
+            rotateX = 8 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'agent-preview':
-            translateY = 45 * signedDist;
-            scale = 0.92 + 0.08 * progress;
-            opacity = Math.min(progress * 1.7, 1);
+            translateY = 30 * signedDist;
+            scale = 0.94 + 0.06 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
             break;
 
-          // Section 4: Specs - 3D Hexa-Matrix Staggered Inflow
+          // Section 4: Specs - 3D Hexa-Matrix Staggered Inflow (Zero Blur, All 6 Cards Always Crisp)
           case 'bento-1':
-            translateX = -90 * signedDist;
-            translateY = 75 * signedDist;
-            rotateZ = -4 * signedDist;
-            scale = 0.84 + 0.16 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 5;
+            translateX = -70 * signedDist;
+            translateY = 55 * signedDist;
+            rotateZ = -2.5 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'bento-2':
-            translateY = 95 * signedDist;
-            rotateX = 14 * signedDist;
-            scale = 0.80 + 0.20 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 6;
+            translateY = 70 * signedDist;
+            rotateX = 10 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'bento-3':
-            translateX = 90 * signedDist;
-            translateY = 75 * signedDist;
-            rotateZ = 4 * signedDist;
-            scale = 0.84 + 0.16 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 5;
+            translateX = 70 * signedDist;
+            translateY = 55 * signedDist;
+            rotateZ = 2.5 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'bento-4':
-            translateX = -70 * signedDist;
-            translateY = 85 * signedDist;
-            rotateZ = -2.5 * signedDist;
-            scale = 0.85 + 0.15 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 5;
+            translateX = -50 * signedDist;
+            translateY = 60 * signedDist;
+            rotateZ = -1.8 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'bento-5':
-            translateY = 105 * signedDist;
-            scale = 0.82 + 0.18 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 6;
+            translateY = 75 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           case 'bento-6':
-            translateX = 70 * signedDist;
-            translateY = 85 * signedDist;
-            rotateZ = 2.5 * signedDist;
-            scale = 0.85 + 0.15 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 5;
+            translateX = 50 * signedDist;
+            translateY = 60 * signedDist;
+            rotateZ = 1.8 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
             break;
 
           // Section 5: Commands - Interlocking Blade Drawers
           case 'cmd-slide-left':
-            translateX = -120 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(progress * 1.6, 1);
-            blur = absDist * 4;
+            translateX = -90 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           case 'cmd-slide-right':
-            translateX = 120 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(progress * 1.6, 1);
-            blur = absDist * 4;
+            translateX = 90 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           // Section 6: FAQ - 3D Folding Deck Fan
           case 'faq-1':
-            translateY = 45 * signedDist;
-            rotateX = 12 * signedDist;
-            scale = 0.92 + 0.08 * progress;
-            opacity = Math.min(progress * 1.5, 1);
+            translateY = 30 * signedDist;
+            rotateX = 7 * signedDist;
+            scale = 0.94 + 0.06 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           case 'faq-2':
-            translateY = 65 * signedDist;
-            rotateX = 16 * signedDist;
-            scale = 0.89 + 0.11 * progress;
-            opacity = Math.min(progress * 1.5, 1);
+            translateY = 45 * signedDist;
+            rotateX = 10 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           case 'faq-3':
-            translateY = 85 * signedDist;
-            rotateX = 20 * signedDist;
-            scale = 0.86 + 0.14 * progress;
-            opacity = Math.min(progress * 1.5, 1);
+            translateY = 60 * signedDist;
+            rotateX = 13 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           case 'faq-4':
-            translateY = 105 * signedDist;
-            rotateX = 24 * signedDist;
-            scale = 0.83 + 0.17 * progress;
-            opacity = Math.min(progress * 1.5, 1);
+            translateY = 75 * signedDist;
+            rotateX = 16 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           // Section Header titles: elegant downward tracking expansion
           case 'section-header':
-            translateY = -35 * signedDist;
-            scale = 0.92 + 0.08 * progress;
-            opacity = Math.min(progress * 1.6, 1);
+            translateY = -25 * signedDist;
+            scale = 0.95 + 0.05 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
             break;
 
           // Call to Action Card
           case 'cta-card':
-            translateY = 70 * signedDist;
-            scale = 0.86 + 0.14 * progress;
-            opacity = Math.min(progress * 1.5, 1);
-            blur = absDist * 5;
+            translateY = 50 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           default:
-            translateY = 50 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(progress * 1.5, 1);
+            translateY = 35 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
         }
 
         el.style.transform = `perspective(1000px) translate3d(${translateX.toFixed(1)}px, ${translateY.toFixed(1)}px, ${translateZ.toFixed(1)}px) rotateX(${rotateX.toFixed(1)}deg) rotateY(${rotateY.toFixed(1)}deg) rotateZ(${rotateZ.toFixed(1)}deg) scale(${scale.toFixed(3)})`;
         el.style.opacity = Math.max(opacity, 0).toFixed(3);
-        el.style.filter = blur > 0.3 ? `blur(${blur.toFixed(1)}px)` : 'none';
+        el.style.filter = 'none';
       });
     }
 
