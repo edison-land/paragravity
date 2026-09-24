@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://edison-land.github.io/paragravity/sitemap.xml

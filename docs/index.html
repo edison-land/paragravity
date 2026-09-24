@@ -4,18 +4,103 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ParaGravity — Unlimited Parallel Multi-Account & Sandbox Architecture for Google Antigravity</title>
-  <meta name="description" content="Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity. Run unlimited Gemini Pro accounts side-by-side on macOS and Windows.">
+  <meta name="description" content="Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity. Run unlimited Gemini Pro accounts side-by-side on macOS and Windows with 0 MB idle RAM.">
+  <meta name="keywords" content="Google Antigravity, Antigravity, multi-account, multiple accounts, sandbox, parallel instances, Gemini 2.5 Pro, AI coding, pgrav, macOS Spotlight, Windows sandbox, rate limit, quota bypass, profile manager, developer tools">
   <meta name="author" content="Edison (@Edison_aware)">
+  <link rel="canonical" href="https://edison-land.github.io/paragravity/">
+  <meta name="theme-color" content="#000000">
 
-  <!-- Open Graph / Twitter Cards -->
+  <!-- Open Graph / Facebook -->
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://edison-land.github.io/paragravity">
-  <meta property="og:title" content="ParaGravity — Unlimited Multi-Account Sandboxes for Antigravity">
-  <meta property="og:description" content="Run unlimited isolated Google Gemini accounts side-by-side on macOS & Windows. Agent-ready setup guide. 100% non-invasive.">
+  <meta property="og:url" content="https://edison-land.github.io/paragravity/">
+  <meta property="og:site_name" content="ParaGravity">
+  <meta property="og:title" content="ParaGravity — Unlimited Multi-Account Sandboxes for Google Antigravity">
+  <meta property="og:description" content="Run unlimited isolated Google Gemini accounts side-by-side on macOS & Windows. Agent-ready setup guide. 100% non-invasive, 0 MB idle RAM.">
+  <meta property="og:image" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta property="og:image:secure_url" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="ParaGravity — Unlimited Parallel Multi-Account & Sandbox Architecture for Google Antigravity">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="zh_CN">
+
+  <!-- Twitter Cards -->
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@Edison_aware">
   <meta name="twitter:creator" content="@Edison_aware">
   <meta name="twitter:title" content="ParaGravity — Unlimited Multi-Instance Antigravity">
   <meta name="twitter:description" content="Break free from Gemini rate limits. Native macOS Spotlight integration, 0 MB idle RAM, Agent-ready prompt.">
+  <meta name="twitter:image" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta name="twitter:image:alt" content="ParaGravity — Multi-Account Sandboxes for Google Antigravity">
+
+  <!-- JSON-LD Structured Data: SoftwareApplication & FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "ParaGravity",
+        "alternateName": "pgrav",
+        "url": "https://edison-land.github.io/paragravity/",
+        "image": "https://edison-land.github.io/paragravity/assets/og-image.png",
+        "description": "Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity on macOS and Windows.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Edison",
+          "url": "https://x.com/Edison_aware"
+        },
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/edison-land/paragravity"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does this violate Google ToS or risk banning my accounts?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. ParaGravity utilizes standard Chromium command-line options (--user-data-dir), the officially supported sandbox partitioning flag. No binary executables are decompiled or patched, and the native Google Cloud OAuth flow remains untouched."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Are my Google OAuth tokens and credentials secure?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. All sandboxes reside locally on your disk under ~/.antigravity-profiles/ with owner-only (0700/0600) permissions. ParaGravity contains zero telemetry and makes zero outbound network requests."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I inherit my keybindings and MCP servers?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Pass -i (or --inherit-config) when provisioning a profile. It automatically clones editor settings and links MCP configurations without leaking credentials or conversation histories."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Windows supported?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. ParaGravity provides cross-platform parity on macOS and Windows (PowerShell, CMD, and Git Bash MSYS2). It generates native Windows Start Menu shortcuts for Win + S indexing."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -251,13 +336,13 @@
       </div>
 
       <!-- Main Headline (Strictly 2 Lines with Clean Line Height and No Descender Clipping) -->
-      <h1 id="hero-headline" class="text-3xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-apple-tight text-[#f5f5f7] mb-8 leading-[1.32] sm:leading-[1.35] headline-wrap">
+      <h1 id="hero-headline" class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-apple-tight text-[#f5f5f7] mb-8 sm:mb-10 leading-[1.35] sm:leading-[1.4] headline-wrap">
         <span id="hero-title-1" class="text-titanium inline-block pb-1.5 sm:pb-2.5 mb-1 sm:mb-2" data-i18n="hero_title_1">Run Multiple Antigravity Accounts.</span><br>
         <span id="hero-title-2" class="text-titanium-muted inline-block pb-2 sm:pb-3" data-i18n="hero_title_2">Independent Sandboxes. Zero Quota Stalls.</span>
       </h1>
 
       <!-- Subtitle -->
-      <p id="hero-desc" class="max-w-3xl mx-auto text-base sm:text-xl text-[#86868b] mb-12 leading-relaxed font-normal" data-i18n="hero_desc">
+      <p id="hero-desc" class="max-w-3xl mx-auto text-base sm:text-xl text-[#86868b] mt-4 sm:mt-6 mb-12 leading-relaxed font-normal" data-i18n="hero_desc">
         Run multiple Google accounts side-by-side in strictly isolated sandboxes without relogging. Dual quota pools prevent workflow stalls, instant Spotlight access, 0 MB background RAM.
       </p>
 

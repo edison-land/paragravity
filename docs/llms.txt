@@ -1,0 +1,47 @@
+# ParaGravity
+
+> Unlimited Parallel Multi-Account & Sandbox Architecture for Google Antigravity (macOS & Windows).
+
+ParaGravity (`pgrav`) is a native, non-invasive parallel multi-account and profile isolation manager for Google Antigravity. It enables developers to run unlimited Google Antigravity instances side-by-side on the same machine without logging out or experiencing quota exhaustion stalls.
+
+## Key Capabilities
+
+- **Zero-Contamination Sandboxing**: Partitions user data via Chromium's native `--user-data-dir` flag into `~/.antigravity-profiles/<profile-name>/`. Tokens, chat histories, and cookies never intermingle.
+- **Quota Pool Multiplication**: Run enterprise workspace accounts and personal Gemini Pro accounts concurrently. When one hits 429 rate limits, switch to the other seamlessly.
+- **Native OS Launchers**: Automatically generates macOS Spotlight launcher bundles (`~/Applications/Antigravity (<profile>).app`) and Windows Start Menu shortcuts for 0.2s instant fuzzy launching.
+- **Zero Idle RAM Overhead**: Direct process execution without background daemon, electron wrapping, or persistent polling. 0 MB idle memory consumed.
+- **1-Click MCP & Keybinding Inheritance**: The `-i` (`--inherit-config`) flag clones existing keybindings, editor settings, and symlinks MCP servers from the host Antigravity setup while keeping auth tokens strictly isolated.
+
+## Installation
+
+### macOS (One-liner curl)
+```bash
+curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash
+```
+
+### Windows (PowerShell / Git Bash)
+```powershell
+git clone https://github.com/edison-land/paragravity.git $HOME\.paragravity
+# Add $HOME\.paragravity\bin to PATH
+```
+
+## CLI Cheatsheet
+
+- `pgrav create <name> [-i]`: Provision an isolated profile. Pass `-i` to inherit keybindings and MCP configurations.
+- `pgrav launch <name>`: Launch the specified profile sandbox window.
+- `pgrav list`: Inspect all configured profile sandboxes and active running instances.
+- `pgrav remove <name>`: Cleanly delete a sandbox profile and its Spotlight launcher.
+- `pgrav doctor`: Run self-diagnostic checks across binary paths, sandbox permissions, and symlinks.
+
+## Instructions for AI Agents
+
+For autonomous coding agents (Antigravity, Cursor, Claude Code, Windsurf) setting up ParaGravity, refer to the machine-readable setup guide:
+- Setup Specification: https://raw.githubusercontent.com/edison-land/paragravity/main/docs/agent.md
+
+## Official Links
+
+- Website: https://edison-land.github.io/paragravity/
+- GitHub: https://github.com/edison-land/paragravity
+- Agent Guide: https://edison-land.github.io/paragravity/agent.md
+- Author: Edison (https://x.com/Edison_aware)
+- License: MIT
