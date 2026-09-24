@@ -135,7 +135,7 @@ class ProfileNameValidationTests(unittest.TestCase):
                     # validation exits 1. Either way nothing may be created.
                     self.assertNotEqual(result.returncode, 0, result)
                     if result.returncode == 1:
-                        self.assertIn("Invalid profile name", result.stdout)
+                        self.assertIn("Invalid profile name", result.stderr + result.stdout)
                     # No profile metadata may be written anywhere for rejected names
                     self.assertFalse((profiles / name / "profile.json").exists(), result)
 
@@ -275,6 +275,35 @@ class ProcessManagementTests(unittest.TestCase):
             self.assertTrue(wait_until(lambda: not pid_alive(child_pid)),
                             "language-server child must not be orphaned")
 
+    @unittest.skipUnless(IS_DARWIN, "process-group semantics verified on macOS")
+    def test_stop_reaps_children_of_foreground_launch(self):
+        """Foreground launches share the caller's process group, so the
+        group-kill path can't reach their children — stop must reap them."""
+        with sandbox_home() as (home, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            fake = home / "fake-antigravity"
+            child_pid_file = home / "child.pid"
+            self._make_fake_app(fake, child_pid_file)
+
+            self.assertEqual(run_cli(["create", "fg"], env).returncode, 0)
+            launch = subprocess.Popen(
+                [sys.executable, str(CLI), "launch", "fg", "--app", str(fake), "-f"],
+                env=env, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            try:
+                self.assertTrue(wait_until(child_pid_file.is_file), "fake app never started")
+                child_pid = int(child_pid_file.read_text())
+                self.assertTrue(pid_alive(child_pid))
+
+                stop = run_cli(["stop", "fg"], env)
+                self.assertEqual(stop.returncode, 0, stop.stderr)
+                self.assertTrue(wait_until(lambda: not pid_alive(child_pid)),
+                                "foreground launch children must not be orphaned by stop")
+            finally:
+                launch.terminate()
+                launch.wait(timeout=5)
+
     @unittest.skipUnless(IS_DARWIN, "BSD pgrep specific")
     def test_pgrep_fallback_finds_running_instance_without_pidfile(self):
         with sandbox_home() as (home, env):
@@ -313,7 +342,7 @@ class ProcessManagementTests(unittest.TestCase):
             try:
                 result = run_cli(["delete", "grp", "--force"], env)
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("currently running", result.stdout)
+                self.assertIn("currently running", result.stderr + result.stdout)
                 self.assertTrue((profiles / "grp").exists())
             finally:
                 run_cli(["stop", "grp"], env)
@@ -429,7 +458,7 @@ class NewFeatureTests(unittest.TestCase):
             self.assertEqual(run_cli(["create", "ws"], env).returncode, 0)
             result = run_cli(["launch", "ws", "--app", str(fake), "/definitely/not/here"], env)
             self.assertEqual(result.returncode, 1, result)
-            self.assertIn("does not exist", result.stdout)
+            self.assertIn("does not exist", result.stderr + result.stdout)
             self.assertFalse((profiles / "ws" / "run.pid").exists(), "must not record a pid")
 
     def test_list_json_is_parseable(self):
@@ -527,7 +556,7 @@ class ConfigurationInheritanceTests(unittest.TestCase):
             "jetski-standalone-oauth-token": "SECRET_HOST_TOKEN_DO_NOT_LEAK",
             "google_accounts": [{"email": "host@gmail.com"}],
             "lastLoginUsername": "host@gmail.com",
-            "mcpServers": {"pencil": {"command": "pencil-mcp"}}
+            "mcpServers": {"pencil": {"command": "pencil-mcp", "env": {"PENCIL_API_KEY": "SECRET_MCP_KEY", "PLAIN_FLAG": "keep-me"}}}
         }))
         (gemini / "jetski-standalone-oauth-token").write_text("RAW_BEARER_TOKEN_HOST")
 
@@ -540,7 +569,7 @@ class ConfigurationInheritanceTests(unittest.TestCase):
             }
         }))
         (gemini_cfg / "mcp_config.json").write_text(json.dumps({
-            "mcpServers": {"pencil": {"command": "pencil-mcp"}}
+            "mcpServers": {"pencil": {"command": "pencil-mcp", "env": {"PENCIL_API_KEY": "SECRET_MCP_KEY", "PLAIN_FLAG": "keep-me"}}}
         }))
 
         skills_dir = gemini_cfg / "skills" / "custom-skill"
@@ -651,6 +680,23 @@ class ConfigurationInheritanceTests(unittest.TestCase):
             res_ghost = run_cli(["create", "new_p2", "--clone-from", "ghost_prof"], env)
             self.assertEqual(res_ghost.returncode, 1)
             self.assertIn("does not exist", res_ghost.stderr + res_ghost.stdout)
+
+    def test_mcp_secret_values_stripped(self):
+        """MCP env/headers secrets must not ride along into a clone — the
+        'credentials never copied' guarantee has to reach inside mcpServers."""
+        with sandbox_home() as (home, env):
+            self._setup_host_env(home)
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            self.assertEqual(run_cli(["create", "mcp_prof", "-i"], env).returncode, 0)
+
+            mcp_cfg = json.loads((profiles / "mcp_prof" / "home" / ".gemini" / "config" / "mcp_config.json").read_text())
+            env_map = mcp_cfg["mcpServers"]["pencil"]["env"]
+            self.assertEqual(env_map.get("PENCIL_API_KEY"), "", "MCP secret env must be stripped")
+            self.assertEqual(env_map.get("PLAIN_FLAG"), "keep-me", "non-secret env must be preserved")
+
+            gemini_s = json.loads((profiles / "mcp_prof" / "home" / ".gemini" / "settings.json").read_text())
+            s_env = gemini_s["mcpServers"]["pencil"]["env"]
+            self.assertEqual(s_env.get("PENCIL_API_KEY"), "")
 
     def test_no_mcp_flag(self):
         with sandbox_home() as (home, env):
@@ -776,6 +822,126 @@ class WebConsoleTests(unittest.TestCase):
                     os.environ["PARAGRAVITY_PROFILES_DIR"] = old_profiles_dir
                 else:
                     os.environ.pop("PARAGRAVITY_PROFILES_DIR", None)
+
+    def test_static_traversal_blocked(self):
+        """`/..` and `%2e%2e` must never escape dashboard/dist (LFI fix)."""
+        import socket
+        import threading
+        import urllib.error
+        import urllib.request
+
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import web_server
+
+        with tempfile.TemporaryDirectory(prefix="pgrav-dist-") as tmp:
+            root = Path(tmp)
+            dist = root / "dist"
+            dist.mkdir()
+            (dist / "index.html").write_text("<html>ok</html>")
+            (root / "secret.txt").write_text("SECRET-LEAK")
+
+            old_dist = web_server.DASHBOARD_DIST
+            web_server.DASHBOARD_DIST = dist
+            httpd = web_server.ThreadingHTTPServer(("127.0.0.1", 0), web_server.ParaGravityHandler)
+            port = httpd.server_port
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            try:
+                # urllib normalizes dot-segments, so drive the raw socket for
+                # the literal `/../` probe — exactly what curl --path-as-is sends.
+                s = socket.create_connection(("127.0.0.1", port), timeout=3)
+                s.sendall(b"GET /../secret.txt HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+                raw = s.recv(8192).decode("utf-8", "replace")
+                s.close()
+                self.assertNotIn("SECRET-LEAK", raw, "traversal must not serve files outside dist")
+                self.assertIn("403", raw.split("\r\n")[0])
+
+                # Percent-encoded traversal must also be rejected.
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/%2e%2e/secret.txt", timeout=3)
+                    self.fail("percent-encoded traversal must be rejected")
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 403)
+
+                # GET APIs now honour the same origin policy as POST/DELETE.
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/profiles",
+                    headers={"Origin": "http://evil-attacker.com"},
+                )
+                try:
+                    urllib.request.urlopen(req, timeout=3)
+                    self.fail("cross-origin GET must be rejected")
+                except urllib.error.HTTPError as e:
+                    self.assertEqual(e.code, 403)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                web_server.DASHBOARD_DIST = old_dist
+
+
+class RegressionHardeningTests(unittest.TestCase):
+    """Locks in the hardening fixes: JSON purity, argv handling, pid reuse."""
+
+    def test_list_json_empty_emits_json_array(self):
+        with sandbox_home() as (home, env):
+            # profiles dir does not exist at all
+            res = run_cli(["list", "--json"], env)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(json.loads(res.stdout), [])
+
+            # exists but empty
+            Path(env["PARAGRAVITY_PROFILES_DIR"]).mkdir(parents=True)
+            res = run_cli(["list", "--json"], env)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(json.loads(res.stdout), [])
+
+    def test_extra_positional_rejected_on_non_path_commands(self):
+        """The Python<3.10 path fallback must not swallow garbage args."""
+        with sandbox_home() as (_, env):
+            self.assertEqual(run_cli(["create", "victim"], env).returncode, 0)
+            for argv in (["delete", "victim", "oops"], ["stop", "victim", "typo"]):
+                with self.subTest(argv=argv):
+                    res = run_cli(argv, env)
+                    self.assertEqual(res.returncode, 2)
+                    self.assertIn("unrecognized arguments", res.stderr)
+            self.assertTrue(
+                (Path(env["PARAGRAVITY_PROFILES_DIR"]) / "victim").exists(),
+                "rejected command must not have side effects",
+            )
+
+    def test_logs_lines_zero_prints_nothing(self):
+        with sandbox_home() as (_, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            self.assertEqual(run_cli(["create", "lg"], env).returncode, 0)
+            log_dir = profiles / "lg" / "logs"
+            log_dir.mkdir(parents=True)
+            (log_dir / "launch-1.log").write_text("line-a\nline-b\n")
+
+            res = run_cli(["logs", "lg", "-n", "0"], env)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(res.stdout, "")
+            res = run_cli(["logs", "lg", "-n", "1"], env)
+            self.assertEqual(res.stdout.strip(), "line-b")
+
+    @unittest.skipUnless(not IS_WINDOWS, "POSIX ps/pid semantics")
+    def test_stale_pidfile_recycled_pid_is_not_trusted(self):
+        """A run.pid pointing at a recycled, unrelated pid must not make the
+        profile look 'running' — and must never be a kill target."""
+        with sandbox_home() as (_, env):
+            profiles = Path(env["PARAGRAVITY_PROFILES_DIR"])
+            self.assertEqual(run_cli(["create", "zp"], env).returncode, 0)
+
+            sleeper = subprocess.Popen(["sleep", "30"])
+            try:
+                pid_file = profiles / "zp" / "run.pid"
+                pid_file.write_text(str(sleeper.pid))
+                module = load_cli_module()
+                self.assertEqual(
+                    module.get_profile_process(profiles / "zp", profiles / "zp" / "data"),
+                    0, "recycled pid must not be treated as the profile process")
+                self.assertFalse(pid_file.exists(), "stale pid file must be removed")
+            finally:
+                sleeper.terminate()
+                sleeper.wait()
 
 
 if __name__ == "__main__":

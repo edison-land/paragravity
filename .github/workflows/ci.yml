@@ -42,6 +42,33 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: python -m unittest discover -s tests -v
 
+  tests-system-python:
+    # The CLT system interpreter is the default `python3` many users get —
+    # run the full suite on it, not just a syntax check.
+    name: Unit tests (macOS system python3)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test suite on /usr/bin/python3
+        run: /usr/bin/python3 -m unittest discover -s tests -v
+
+  dashboard:
+    name: Dashboard typecheck & build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - name: Install & build
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
   shellcheck:
     name: shellcheck
     runs-on: macos-latest

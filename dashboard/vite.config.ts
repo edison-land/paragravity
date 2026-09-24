@@ -84,7 +84,7 @@ export default defineConfig({
             // GET /api/system
             if (req.method === 'GET' && pathname === '/api/system') {
               return res.end(JSON.stringify({
-                version: '1.0.0',
+                version: '1.1.0',
                 theme: 'dawn-iris',
                 themeName: '晨曦紫霞白 (Dawn Iris & Violet)',
                 platform: process.platform,

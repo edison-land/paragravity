@@ -29,8 +29,14 @@ echo " • Downloading paragravity binary to ${INSTALL_DIR}..."
 curl -fsSL "${RAW_BASE}/bin/paragravity" -o "${INSTALL_DIR}/paragravity"
 chmod +x "${INSTALL_DIR}/paragravity"
 
-# Symlink pgrav alias
-ln -sf "paragravity" "${INSTALL_DIR}/pgrav"
+# pgrav short alias — the repo ships it as a POSIX shim (not a symlink) so it
+# also survives Windows Git Bash clones; install it the same way here.
+curl -fsSL "${RAW_BASE}/bin/pgrav" -o "${INSTALL_DIR}/pgrav"
+chmod +x "${INSTALL_DIR}/pgrav"
+
+# web_server.py backs `pgrav web` — it is imported from the script's own
+# directory, so it must live next to the paragravity binary.
+curl -fsSL "${RAW_BASE}/bin/web_server.py" -o "${INSTALL_DIR}/web_server.py"
 
 # Configure Shell PATH if needed (check the rc file itself, so re-running the
 # installer never appends duplicate PATH lines)
@@ -50,6 +56,7 @@ esac
 if [[ "${SHELL_NAME}" == "fish" ]]; then
     if ! grep -qsF 'set -gx PATH $HOME/.local/bin $PATH' "${RC_FILE}"; then
         echo " • Adding ${INSTALL_DIR} to PATH in ${RC_FILE}..."
+        mkdir -p "$(dirname "${RC_FILE}")"
         echo "set -gx PATH \$HOME/.local/bin \$PATH" >> "${RC_FILE}"
     fi
 elif ! grep -qsF 'export PATH="$HOME/.local/bin:$PATH"' "${RC_FILE}"; then

@@ -8,9 +8,9 @@ License: MIT
 """
 
 from __future__ import annotations
-from typing import Optional
 
 import os
+import re
 import sys
 import json
 import base64
@@ -62,15 +62,17 @@ def get_default_app_bin() -> str:
 DEFAULT_APP_BIN = get_default_app_bin()
 DEFAULT_PROFILES_DIR = Path.home() / ".antigravity-profiles"
 
-# ANSI Colors
-COLOR_RESET = "\033[0m"
-COLOR_BOLD = "\033[1m"
-COLOR_GREEN = "\033[32m"
-COLOR_BLUE = "\033[34m"
-COLOR_YELLOW = "\033[33m"
-COLOR_RED = "\033[31m"
-COLOR_CYAN = "\033[36m"
-COLOR_DIM = "\033[2m"
+# ANSI Colors — disabled when output is piped or NO_COLOR is set, so
+# `pgrav list | cat`, `--json` consumers and CI logs stay clean.
+_COLOR_ENABLED = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+COLOR_RESET = "\033[0m" if _COLOR_ENABLED else ""
+COLOR_BOLD = "\033[1m" if _COLOR_ENABLED else ""
+COLOR_GREEN = "\033[32m" if _COLOR_ENABLED else ""
+COLOR_BLUE = "\033[34m" if _COLOR_ENABLED else ""
+COLOR_YELLOW = "\033[33m" if _COLOR_ENABLED else ""
+COLOR_RED = "\033[31m" if _COLOR_ENABLED else ""
+COLOR_CYAN = "\033[36m" if _COLOR_ENABLED else ""
+COLOR_DIM = "\033[2m" if _COLOR_ENABLED else ""
 
 def get_profiles_dir() -> Path:
     env_dir = os.environ.get("PARAGRAVITY_PROFILES_DIR") or os.environ.get("AGY_PROFILES_DIR")
@@ -80,9 +82,8 @@ def get_profiles_dir() -> Path:
 
 def validate_profile_name(name: str):
     """Reject names that could escape the profiles directory or be interpreted by a shell."""
-    import re
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", name):
-        print(f"{COLOR_RED}Error: Invalid profile name '{name}'. Use 1-64 characters: letters, digits, '.', '_', '-' (must start with a letter or digit).{COLOR_RESET}")
+        print(f"{COLOR_RED}Error: Invalid profile name '{name}'. Use 1-64 characters: letters, digits, '.', '_', '-' (must start with a letter or digit).{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
 def prompt_yes_no(message: str, default_no: bool = True) -> bool:
@@ -115,8 +116,10 @@ def harden_profile_perms(profile_dir: Path, profiles_dir: Path):
 
 def get_app_binary() -> str:
     env_bin = os.environ.get("ANTIGRAVITY_BIN")
-    if env_bin and os.path.isfile(env_bin):
-        return env_bin
+    if env_bin:
+        if os.path.isfile(env_bin):
+            return env_bin
+        print(f"{COLOR_YELLOW}Warning: ANTIGRAVITY_BIN is set but not a file: {env_bin} — ignoring.{COLOR_RESET}", file=sys.stderr)
     return get_default_app_bin()
 
 def get_directory_size(path: Path) -> str:
@@ -204,7 +207,6 @@ def extract_account_info(profile_dir: Path) -> dict:
     return info
 
 def strip_ansi(text: str) -> str:
-    import re
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 def pad_visible(text: str, width: int) -> str:
@@ -244,25 +246,63 @@ def is_pid_running(pid: int) -> bool:
         except (OSError, ProcessLookupError, SystemError):
             return False
 
+def _ps_escape_like(text: str) -> str:
+    """Escape PowerShell -like wildcards inside an embedded literal."""
+    return (text.replace("[", "[[]")
+                .replace("*", "[*]")
+                .replace("?", "[?]"))
+
+def _ps_single_quote(text: str) -> str:
+    """Quote a string for a single-quoted PowerShell literal."""
+    return "'" + text.replace("'", "''") + "'"
+
+def _pid_matches_profile(pid: int, data_dir: Path) -> bool:
+    """Confirm the live pid actually belongs to this profile.
+
+    A stale run.pid can name a pid the OS has since recycled for an unrelated
+    process — without this check `stop` would SIGTERM an innocent victim.
+    """
+    marker = f"--user-data-dir={data_dir.resolve()}"
+    try:
+        if IS_WINDOWS:
+            ps_cmd = (
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\").CommandLine"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                stderr=subprocess.DEVNULL
+            )
+            cmdline = out.decode("utf-8", "replace")
+        else:
+            out = subprocess.check_output(
+                ["ps", "-o", "command=", "-p", str(pid)],
+                stderr=subprocess.DEVNULL
+            )
+            cmdline = out.decode("utf-8", "replace")
+    except Exception:
+        return False
+    return marker in cmdline or "Antigravity" in cmdline
+
 def get_profile_process(profile_name: Path, data_dir: Path) -> int:
     """Check if Antigravity is running with this profile's data_dir."""
     pid_file = profile_name / "run.pid"
     if pid_file.is_file():
         try:
             pid = int(pid_file.read_text().strip())
-            if is_pid_running(pid):
+            if is_pid_running(pid) and _pid_matches_profile(pid, data_dir):
                 return pid
-            else:
-                pid_file.unlink(missing_ok=True)
+            # Stale or recycled pid — do not trust it.
+            pid_file.unlink(missing_ok=True)
         except Exception:
             pass
 
     # Fallback to process search
     if IS_WINDOWS:
         try:
+            like_path = _ps_escape_like(str(data_dir.resolve()))
             ps_cmd = (
                 f"Get-CimInstance Win32_Process | "
-                f"Where-Object {{ $_.ProcessId -ne $PID -and $_.Name -notlike '*powershell*' -and $_.Name -notlike '*pwsh*' -and $_.CommandLine -like '*--user-data-dir={data_dir.resolve()}*' }} | "
+                f"Where-Object {{ $_.ProcessId -ne $PID -and $_.Name -notlike '*powershell*' -and $_.Name -notlike '*pwsh*' -and $_.CommandLine -like {_ps_single_quote('*--user-data-dir=' + like_path + '*')} }} | "
                 f"Select-Object -ExpandProperty ProcessId"
             )
             out = subprocess.check_output(
@@ -276,7 +316,9 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
             pass
     else:
         try:
-            pattern = f"--user-data-dir={data_dir.resolve()}( |$)"
+            # re.escape the path: PARAGRAVITY_PROFILES_DIR may contain regex
+            # metacharacters that would otherwise widen the match.
+            pattern = f"--user-data-dir={re.escape(str(data_dir.resolve()))}( |$)"
             out = subprocess.check_output(["pgrep", "-f", "--", pattern], stderr=subprocess.DEVNULL)
             pids = [int(p) for p in out.decode().split() if p.strip()]
             if pids:
@@ -457,12 +499,12 @@ def setup_profile_inheritance(
                 return False
             if not _is_path_safe(src_d, src_root) and not _is_path_safe(src_d, src_app_support):
                 return False
-            dst_d.mkdir(parents=True, exist_ok=True)
-            os.chmod(dst_d, 0o700)
             copied_any = False
-            for item in src_d.iterdir():
+            for item in src_d.rglob("*"):
                 if item.is_file() and not item.is_symlink():
-                    d_file = dst_d / item.name
+                    d_file = dst_d / item.relative_to(src_d)
+                    d_file.parent.mkdir(parents=True, exist_ok=True)
+                    os.chmod(d_file.parent, 0o700)
                     shutil.copy2(item, d_file)
                     os.chmod(d_file, 0o600)
                     copied_any = True
@@ -525,6 +567,29 @@ def setup_profile_inheritance(
         _safe_copy(src_user_dir / "keybindings.json", tgt_user_dir / "keybindings.json")
         _safe_copy_dir(src_user_dir / "snippets", tgt_user_dir / "snippets")
 
+    def _sanitize_mcp_servers(servers) -> dict:
+        """Strip secret-looking values from an mcpServers mapping.
+
+        MCP server definitions routinely embed API keys/tokens in `env` and
+        `headers` — the "credentials are never copied" guarantee has to reach
+        into these, or --inherit-config would leak keys into every clone.
+        """
+        secret_key = re.compile(r"key|token|secret|password|credential|auth|signature|private", re.IGNORECASE)
+        if not isinstance(servers, dict):
+            return servers
+        clean = {}
+        for srv_name, srv in servers.items():
+            if isinstance(srv, dict):
+                srv = dict(srv)
+                for field in ("env", "headers"):
+                    if isinstance(srv.get(field), dict):
+                        srv[field] = {
+                            k: ("" if secret_key.search(str(k)) else v)
+                            for k, v in srv[field].items()
+                        }
+            clean[srv_name] = srv
+        return clean
+
     # Target ~/.gemini/settings.json
     src_gemini_settings = src_gemini / "settings.json"
     if src_gemini_settings.is_file() and not src_gemini_settings.is_symlink():
@@ -540,8 +605,10 @@ def setup_profile_inheritance(
                 k_lower = k.lower()
                 if k in sensitive_keys or "oauth" in k_lower or "token" in k_lower or "secret" in k_lower or "credential" in k_lower:
                     continue
-                if not inherit_mcp and k == "mcpServers":
-                    continue
+                if k == "mcpServers":
+                    if not inherit_mcp:
+                        continue
+                    v = _sanitize_mcp_servers(v)
                 filtered[k] = v
             dst_s = tgt_gemini / "settings.json"
             dst_s.write_text(json.dumps(filtered, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -567,11 +634,21 @@ def setup_profile_inheritance(
         except Exception:
             pass
 
-    # 3. MCP tool configurations (mcp_config.json)
+    # 3. MCP tool configurations (mcp_config.json) — copied with secret env
+    # values stripped (see _sanitize_mcp_servers above).
     if inherit_mcp:
         src_mcp = src_gemini / "config" / "mcp_config.json"
         if src_mcp.is_file() and not src_mcp.is_symlink():
-            _safe_copy(src_mcp, tgt_gemini_cfg / "mcp_config.json")
+            try:
+                mcp_raw = json.loads(src_mcp.read_text(encoding="utf-8"))
+                if isinstance(mcp_raw, dict) and "mcpServers" in mcp_raw:
+                    mcp_raw["mcpServers"] = _sanitize_mcp_servers(mcp_raw["mcpServers"])
+                dst_mcp = tgt_gemini_cfg / "mcp_config.json"
+                dst_mcp.write_text(json.dumps(mcp_raw, indent=2, ensure_ascii=False), encoding="utf-8")
+                os.chmod(dst_mcp, 0o600)
+                report["files_copied"].append("mcp_config.json")
+            except Exception:
+                _safe_copy(src_mcp, tgt_gemini_cfg / "mcp_config.json")
 
     # 4. Agent Skills & Plugins
     src_skills = src_gemini / "config" / "skills"
@@ -591,14 +668,14 @@ def setup_profile_inheritance(
     harden_profile_perms(target_profile_dir, profiles_dir)
     return report
 
-def create_macos_app_shortcut(profile_name: str, app_display_name: str = None) -> Path:
+def create_macos_app_shortcut(profile_name: str) -> Path:
     """Create a macOS native .app in ~/Applications so Spotlight and Dock can launch it."""
     if not IS_DARWIN:
         return None
     apps_dir = Path.home() / "Applications"
     apps_dir.mkdir(exist_ok=True)
-    
-    display_name = app_display_name or f"Antigravity ({profile_name})"
+
+    display_name = f"Antigravity ({profile_name})"
     target_app = apps_dir / f"{display_name}.app"
     script_path = Path(__file__).resolve()
     orig_icns = Path("/Applications/Antigravity.app/Contents/Resources/icon.icns")
@@ -662,13 +739,16 @@ def create_windows_shortcut(profile_name: str) -> Path | None:
             return None
 
         for target in targets:
+            # All interpolated paths go through _ps_single_quote: a user
+            # profile path containing an apostrophe (e.g. "O'Brien") would
+            # otherwise break the script or inject PowerShell syntax.
             ps_script = (
                 f"$ws = New-Object -ComObject WScript.Shell; "
-                f"$s = $ws.CreateShortcut('{str(target)}'); "
-                f"$s.TargetPath = '{py_exe}'; "
-                f"$s.Arguments = '\"{str(script_path)}\" launch {profile_name}'; "
-                f"$s.IconLocation = '{app_bin},0'; "
-                f"$s.WorkingDirectory = '{str(get_profiles_dir() / profile_name)}'; "
+                f"$s = $ws.CreateShortcut({_ps_single_quote(str(target))}); "
+                f"$s.TargetPath = {_ps_single_quote(str(py_exe))}; "
+                f"$s.Arguments = {_ps_single_quote(chr(34) + str(script_path) + chr(34) + ' launch ' + profile_name)}; "
+                f"$s.IconLocation = {_ps_single_quote(str(app_bin) + ',0')}; "
+                f"$s.WorkingDirectory = {_ps_single_quote(str(get_profiles_dir() / profile_name))}; "
                 f"$s.Save()"
             )
             res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script], capture_output=True)
@@ -822,27 +902,37 @@ def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
         "token_exp": acc_info.get("token_exp"),
         "token_state": token_expiry_state(acc_info.get("token_exp")),
         "size": get_directory_size(profile_dir) if include_size else None,
+        "directory": str(profile_dir),
+        "created_at": meta.get("created_at"),
         "description": meta.get("description", ""),
         "inherited_from": meta.get("inherited_from"),
     }
 
 def cmd_list(args):
     """List all profiles, their status, and bound accounts."""
+    as_json = bool(getattr(args, "json", False))
     profiles_dir = get_profiles_dir()
     if not profiles_dir.exists():
-        print(f"{COLOR_YELLOW}No profiles found. Create one with: paragravity create <name>{COLOR_RESET}")
+        # --json must emit valid JSON on stdout; human hints go to stderr.
+        if as_json:
+            print("[]")
+        else:
+            print(f"{COLOR_YELLOW}No profiles found. Create one with: paragravity create <name>{COLOR_RESET}")
         return
 
     profiles = sorted([p for p in profiles_dir.iterdir() if p.is_dir() and (p / "profile.json").exists()])
     if not profiles:
-        print(f"{COLOR_YELLOW}No profiles found in {profiles_dir}.{COLOR_RESET}")
-        print(f"Run: {COLOR_CYAN}paragravity create <name>{COLOR_RESET} to create your first profile.")
+        if as_json:
+            print("[]")
+        else:
+            print(f"{COLOR_YELLOW}No profiles found in {profiles_dir}.{COLOR_RESET}")
+            print(f"Run: {COLOR_CYAN}paragravity create <name>{COLOR_RESET} to create your first profile.")
         return
 
     include_size = bool(getattr(args, "size", False))
     summaries = [profile_summary(p, include_size=include_size) for p in profiles]
 
-    if getattr(args, "json", False):
+    if as_json:
         print(json.dumps(summaries, indent=2, ensure_ascii=False))
         return
 
@@ -919,7 +1009,7 @@ def cmd_launch(args):
     if getattr(args, "path", None):
         workspace = Path(args.path).expanduser().resolve()
         if not workspace.exists():
-            print(f"{COLOR_RED}Error: workspace path does not exist:{COLOR_RESET} {workspace}")
+            print(f"{COLOR_RED}Error: workspace path does not exist:{COLOR_RESET} {workspace}", file=sys.stderr)
             sys.exit(1)
 
     data_dir = profile_dir / "data"
@@ -932,8 +1022,8 @@ def cmd_launch(args):
 
     app_bin = getattr(args, "app", None) or get_app_binary()
     if not os.path.isfile(app_bin):
-        print(f"{COLOR_RED}Error: Antigravity executable not found at:{COLOR_RESET} {app_bin}")
-        print("Please specify path using --app or set ANTIGRAVITY_BIN env var.")
+        print(f"{COLOR_RED}Error: Antigravity executable not found at:{COLOR_RESET} {app_bin}", file=sys.stderr)
+        print("Please specify path using --app or set ANTIGRAVITY_BIN env var.", file=sys.stderr)
         sys.exit(1)
 
     policy = getattr(args, "links", None) or meta.get("symlink_policy", "full")
@@ -987,8 +1077,8 @@ def cmd_launch(args):
     else:
         log_dir = profile_dir / "logs"
         log_dir.mkdir(exist_ok=True)
-        prune_logs(log_dir)
-        log_path = log_dir / time.strftime("launch-%Y%m%d-%H%M%S.log")
+        # Pid suffix avoids two launches in the same second writing to one file.
+        log_path = log_dir / time.strftime(f"launch-%Y%m%d-%H%M%S-{os.getpid()}.log")
         with open(log_path, "ab") as log_f:
             popen_kwargs = {
                 "env": env,
@@ -1003,6 +1093,8 @@ def cmd_launch(args):
                 popen_kwargs["start_new_session"] = True
             proc = subprocess.Popen(cmd, **popen_kwargs)
         (profile_dir / "run.pid").write_text(str(proc.pid))
+        # Prune after the new log exists so the new file is counted in `keep`.
+        prune_logs(log_dir)
         print(f"{COLOR_GREEN}✓ Antigravity window launched! (PID: {proc.pid}){COLOR_RESET}")
         print(f"  Logs:         {log_path} (view with: {COLOR_CYAN}pgrav logs {name}{COLOR_RESET})")
         print(f"  Tip: Sign in with your Google account in this window to bind it to '{name}'.")
@@ -1015,6 +1107,14 @@ def _group_alive(pgid: int) -> bool:
     except OSError:
         return False
 
+def _child_pids(pid: int) -> list:
+    """Direct children of pid (pgrep -P)."""
+    try:
+        out = subprocess.check_output(["pgrep", "-P", str(pid)], stderr=subprocess.DEVNULL)
+        return [int(p) for p in out.decode().split() if p.strip().isdigit()]
+    except Exception:
+        return []
+
 def cmd_stop(args):
     """Stop running instance of a profile."""
     profiles_dir = get_profiles_dir()
@@ -1023,7 +1123,7 @@ def cmd_stop(args):
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
-        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}")
+        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
     data_dir = profile_dir / "data"
@@ -1043,8 +1143,13 @@ def cmd_stop(args):
                 if not is_pid_running(pid):
                     break
                 time.sleep(0.1)
-            if is_pid_running(pid) and not getattr(args, "force", False):
-                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+            if is_pid_running(pid):
+                # Report honestly — never claim success while the process lives.
+                if getattr(args, "force", False):
+                    print(f"{COLOR_RED}Error: could not stop profile '{name}' (PID {pid}).{COLOR_RESET}", file=sys.stderr)
+                else:
+                    print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
+                return
             (profile_dir / "run.pid").unlink(missing_ok=True)
             print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
             return
@@ -1057,11 +1162,19 @@ def cmd_stop(args):
     except (ProcessLookupError, PermissionError):
         group_leader = False
 
+    # Foreground launches share the caller's process group, so the process
+    # group trick can't reach their children — track direct children
+    # individually instead (language_server & helpers are direct children).
+    children = [] if group_leader else _child_pids(pid)
+
     def _kill(sig, target):
         try:
             os.kill(target, sig)
         except (ProcessLookupError, PermissionError):
             pass
+
+    def _stragglers_alive():
+        return any(is_pid_running(c) for c in children)
 
     def _wait_main(deadline_s):
         """Wait for the Electron main process to exit."""
@@ -1075,13 +1188,13 @@ def cmd_stop(args):
         """Wait until the instance is fully gone; the main process dying alone
         is not enough — straggler children count too."""
         for _ in range(int(deadline_s / 0.1)):
-            if not is_pid_running(pid) and not (group_leader and _group_alive(-pid)):
+            if not is_pid_running(pid) and not (group_leader and _group_alive(-pid)) and not _stragglers_alive():
                 return True
             time.sleep(0.1)
-        return not (is_pid_running(pid) or (group_leader and _group_alive(-pid)))
+        return not (is_pid_running(pid) or (group_leader and _group_alive(-pid)) or _stragglers_alive())
 
     def _still_alive():
-        return is_pid_running(pid) or (group_leader and _group_alive(-pid))
+        return is_pid_running(pid) or (group_leader and _group_alive(-pid)) or _stragglers_alive()
 
     try:
         # Stage 1: SIGTERM the Electron main process only, so it can shut down
@@ -1089,17 +1202,26 @@ def cmd_stop(args):
         _kill(signal.SIGTERM, pid)
         _wait_main(3.0)
         # Stage 2: SIGTERM the whole group (language_server etc.) — also
-        # reaps stragglers that outlived the main process.
+        # reaps stragglers that outlived the main process. In the foreground
+        # case there is no group to signal, so hit the children directly.
         if group_leader and _group_alive(-pid):
             _kill(signal.SIGTERM, -pid)
+        for child in children:
+            _kill(signal.SIGTERM, child)
+        if group_leader or children:
             _wait_all(5.0)
         # Stage 3: SIGKILL only on request.
         if _still_alive():
             if getattr(args, "force", False):
                 _kill(signal.SIGKILL, -pid if group_leader else pid)
+                for child in children:
+                    _kill(signal.SIGKILL, child)
                 _wait_all(3.0)
             if _still_alive():
-                print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
+                if getattr(args, "force", False):
+                    print(f"{COLOR_RED}Error: could not stop profile '{name}' even with --force.{COLOR_RESET}", file=sys.stderr)
+                else:
+                    print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
                 return
         (profile_dir / "run.pid").unlink(missing_ok=True)
         print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
@@ -1114,13 +1236,13 @@ def cmd_delete(args):
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
-        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}")
+        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
     data_dir = profile_dir / "data"
     pid = get_profile_process(profile_dir, data_dir)
     if pid:
-        print(f"{COLOR_RED}Error: Profile '{name}' is currently running (PID: {pid}). Stop it first with: paragravity stop {name}{COLOR_RESET}")
+        print(f"{COLOR_RED}Error: Profile '{name}' is currently running (PID: {pid}). Stop it first with: paragravity stop {name}{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
     if not getattr(args, "force", False):
@@ -1141,11 +1263,10 @@ def cmd_info(args):
     profile_dir = profiles_dir / name
 
     if not profile_dir.exists():
-        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}")
+        print(f"{COLOR_RED}Error: Profile '{name}' does not exist.{COLOR_RESET}", file=sys.stderr)
         sys.exit(1)
 
     data_dir = profile_dir / "data"
-    home_dir = profile_dir / "home"
     pid = get_profile_process(profile_dir, data_dir)
     acc_info = extract_account_info(profile_dir)
     size_str = get_directory_size(profile_dir)
@@ -1217,13 +1338,14 @@ def cmd_logs(args):
         return
 
     log_path = logs[0]
+    n_lines = max(0, args.lines)  # `lines[-0:]` would dump the whole file
     try:
         with open(log_path, "rb") as f:
             # Show at most the last 128 KB of the newest log.
             f.seek(0, os.SEEK_END)
             f.seek(max(0, f.tell() - 128 * 1024))
             lines = f.read().decode("utf-8", "replace").splitlines()
-            for line in lines[-args.lines:]:
+            for line in (lines[-n_lines:] if n_lines else []):
                 print(line)
             if not args.follow:
                 return
@@ -1360,12 +1482,19 @@ def main():
         sys.exit(0)
 
     args, extra = parser.parse_known_args()
-    if extra and getattr(args, "path", None) is None and not extra[0].startswith("-"):
+    # Optional `path` positional after flags needs this fallback on Python <3.10
+    # — but only for subcommands that actually declare `path` (launch); other
+    # commands must still reject unexpected positionals instead of swallowing
+    # them silently.
+    if extra and hasattr(args, "path") and getattr(args, "path", None) is None and not extra[0].startswith("-"):
         args.path = extra.pop(0)
     if extra:
         parser.error(f"unrecognized arguments: {' '.join(extra)}")
     if hasattr(args, "func"):
-        args.func(args)
+        try:
+            args.func(args)
+        except KeyboardInterrupt:
+            sys.exit(130)
     else:
         parser.print_help()
 
