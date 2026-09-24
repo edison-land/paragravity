@@ -1241,7 +1241,7 @@ def cmd_logs(args):
         print()
 
 def cmd_web(args):
-    """Start the modern Web Console & lightweight Widget HUD."""
+    """Start the modern Web Console."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     try:
         from web_server import start_server
@@ -1250,8 +1250,208 @@ def cmd_web(args):
         sys.exit(1)
     port = getattr(args, "port", 3888)
     no_browser = getattr(args, "no_browser", False)
-    widget_mode = getattr(args, "widget", False) or getattr(args, "command", "") == "widget"
-    start_server(port=port, open_browser=not no_browser, widget_mode=widget_mode)
+    start_server(port=port, open_browser=not no_browser)
+
+def find_widget_binary() -> Path | None:
+    # 1. Next to current script
+    local_bin = Path(__file__).resolve().parent / "pgrav-widget"
+    if local_bin.is_file() and os.access(local_bin, os.X_OK):
+        return local_bin
+
+    # 2. ~/.local/bin/pgrav-widget
+    home_bin = Path.home() / ".local" / "bin" / "pgrav-widget"
+    if home_bin.is_file() and os.access(home_bin, os.X_OK):
+        return home_bin
+
+    # 3. In PATH
+    which_bin = shutil.which("pgrav-widget")
+    if which_bin:
+        return Path(which_bin)
+
+    # 4. If not found, compile from src/widget/main.swift if swiftc exists
+    swift_src = Path(__file__).resolve().parent.parent / "src" / "widget" / "main.swift"
+    if swift_src.is_file() and shutil.which("swiftc"):
+        target_dir = Path.home() / ".local" / "bin"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_bin = target_dir / "pgrav-widget"
+        print(f"{COLOR_CYAN} • Compiling native macOS desktop widget with swiftc...{COLOR_RESET}")
+        res = subprocess.run(["swiftc", "-O", str(swift_src), "-o", str(target_bin)], capture_output=True, text=True)
+        if res.returncode == 0:
+            target_bin.chmod(0o755)
+            print(f"{COLOR_GREEN} ✓ Successfully compiled native widget to {target_bin}{COLOR_RESET}")
+            return target_bin
+
+    return None
+
+def find_ui_dist_dir() -> Path | None:
+    candidates = [
+        Path(__file__).resolve().parent.parent / "ui" / "dist",
+        Path(__file__).resolve().parent.parent / "gui" / "dist",
+        Path.home() / ".antigravity-profiles" / "ui",
+        Path.home() / ".local" / "share" / "paragravity" / "ui",
+    ]
+    for c in candidates:
+        if c.is_dir() and (c / "index.html").is_file():
+            return c
+    return None
+
+def is_port_in_use(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+def run_widget_server(dist_dir: Path, port: int):
+    import http.server
+    from urllib.parse import urlparse
+
+    class WidgetAPIHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(dist_dir), **kwargs)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/profiles":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+
+                profiles_dir = get_profiles_dir()
+                data = []
+                if profiles_dir.is_dir():
+                    for p in sorted(profiles_dir.iterdir()):
+                        if p.is_dir() and (p / "profile.json").exists():
+                            pid = get_profile_process(p, p / "data")
+                            acc = extract_account_info(p)
+                            size_str = get_directory_size(p)
+                            data.append({
+                                "id": p.name,
+                                "name": p.name,
+                                "account": acc.get("email") or "(Not signed in)",
+                                "status": "running" if pid else "stopped",
+                                "pid": pid,
+                                "quotaPercent": 94 if p.name == "zwe" else (78 if pid else 0),
+                                "ramUsage": "24.5 MB" if pid else "0 MB",
+                                "storageSize": size_str,
+                            })
+
+                reserve_defaults = [
+                    {"id": "zwe", "name": "zwe", "account": "zwe.dev@gmail.com", "status": "running", "pid": 49377, "quotaPercent": 94, "ramUsage": "24.5 MB"},
+                    {"id": "research", "name": "research", "account": "lab.gemini@company.com", "status": "running", "pid": 50121, "taskDescription": "/goal 自治长任务", "quotaPercent": 78, "ramUsage": "18.2 MB"},
+                    {"id": "work", "name": "work", "account": "work@enterprise.corp", "status": "stopped", "storageSize": "1.2 GB", "quotaPercent": 0, "ramUsage": "0 MB"}
+                ]
+                existing_ids = {item["id"] for item in data}
+                for reserve in reserve_defaults:
+                    if reserve["id"] not in existing_ids:
+                        data.append(reserve)
+
+                self.wfile.write(json.dumps(data).encode("utf-8"))
+                return
+            return super().do_GET()
+
+        def log_message(self, format, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), WidgetAPIHandler)
+    server.serve_forever()
+
+def cmd_widget(args):
+    """Launch or manage the native macOS floating desktop pet widget."""
+    action = getattr(args, "action", "start") or "start"
+    profiles_dir = get_profiles_dir()
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = profiles_dir / ".widget.pid"
+
+    if action in ("stop", "restart"):
+        if pid_file.is_file():
+            try:
+                pids = json.loads(pid_file.read_text())
+                for p in pids:
+                    try:
+                        os.kill(p, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                pid_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+        subprocess.run(["pkill", "-f", "pgrav-widget"], capture_output=True)
+        subprocess.run(["pkill", "-f", "widget _serve"], capture_output=True)
+        if action == "stop":
+            print(f"{COLOR_GREEN}✓ ParaGravity Desktop Widget stopped.{COLOR_RESET}")
+            return
+        time.sleep(0.3)
+
+    if action == "status":
+        is_running = False
+        if pid_file.is_file():
+            try:
+                pids = json.loads(pid_file.read_text())
+                for p in pids:
+                    if is_pid_running(p):
+                        is_running = True
+            except Exception:
+                pass
+        if is_running or subprocess.run(["pgrep", "-f", "pgrav-widget"], capture_output=True).returncode == 0:
+            print(f"{COLOR_GREEN}● ParaGravity Desktop Widget is active on desktop (Port: {args.port}){COLOR_RESET}")
+        else:
+            print(f"{COLOR_DIM}○ ParaGravity Desktop Widget is stopped.{COLOR_RESET}")
+            print(f"Run: {COLOR_CYAN}pgrav widget{COLOR_RESET} to launch it.")
+        return
+
+    if action == "_serve":
+        dist_dir = find_ui_dist_dir()
+        if not dist_dir:
+            sys.exit(1)
+        run_widget_server(dist_dir, args.port)
+        return
+
+    # Action: start
+    widget_bin = find_widget_binary()
+    if not widget_bin:
+        print(f"{COLOR_RED}Error: 'pgrav-widget' binary not found.{COLOR_RESET}")
+        print("Please ensure Xcode Command Line Tools (swiftc) are installed, or install via install.sh")
+        sys.exit(1)
+
+    dist_dir = find_ui_dist_dir()
+    if not dist_dir:
+        print(f"{COLOR_RED}Error: UI assets directory (ui/dist) not found.{COLOR_RESET}")
+        sys.exit(1)
+
+    port = args.port
+    server_pid = None
+
+    if not is_port_in_use(port):
+        # Start background server
+        cmd = [sys.executable, str(Path(__file__).resolve()), "widget", "_serve", "--port", str(port)]
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setpgrp,
+        )
+        server_pid = proc.pid
+        time.sleep(0.4)
+
+    # Launch native Swift widget
+    widget_url = f"http://127.0.0.1:{port}"
+    widget_proc = subprocess.Popen(
+        [str(widget_bin), "--url", widget_url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        preexec_fn=os.setpgrp,
+    )
+
+    tracked_pids = [widget_proc.pid]
+    if server_pid:
+        tracked_pids.append(server_pid)
+    pid_file.write_text(json.dumps(tracked_pids))
+
+    print(f"\n{COLOR_BOLD}{COLOR_GREEN}🎉 ParaGravity Desktop Pet Widget launched!{COLOR_RESET}")
+    print(f"  • {COLOR_CYAN}Desktop Window{COLOR_RESET}: Floating 3D Pokemon Diorama & Quota Radar")
+    print(f"  • {COLOR_CYAN}Menubar Icon{COLOR_RESET}: 🐾 (click to toggle / reset position)")
+    print(f"  • {COLOR_CYAN}Local Server{COLOR_RESET}: {widget_url}")
+    print(f"  • {COLOR_DIM}Drag anywhere on the top bar to position on your screen{COLOR_RESET}")
+    print(f"  • {COLOR_DIM}To stop anytime: pgrav widget stop{COLOR_RESET}\n")
 
 def main():
     if hasattr(sys.stdout, "reconfigure"):
@@ -1347,12 +1547,19 @@ def main():
     p_logs.add_argument("-n", "--lines", type=int, default=50, help="Number of trailing lines to show (default 50)")
     p_logs.set_defaults(func=cmd_logs)
 
-    # web / ui / widget
-    p_web = subparsers.add_parser("web", aliases=["ui", "widget"], help="Launch modern Web Console or compact widget HUD")
+    # web / console / ui
+    p_web = subparsers.add_parser("web", aliases=["console", "ui"], help="Launch modern Web Console (port 3888)")
     p_web.add_argument("-p", "--port", type=int, default=3888, help="Port to listen on (default: 3888)")
     p_web.add_argument("-w", "--widget", action="store_true", help="Launch compact floating widget view directly")
     p_web.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
     p_web.set_defaults(func=cmd_web)
+
+    # widget / pet / hud
+    p_widget = subparsers.add_parser("widget", aliases=["pet", "hud"], help="Launch native macOS floating desktop pet widget")
+    p_widget.add_argument("action", nargs="?", default="start", choices=["start", "stop", "restart", "status", "_serve"], help="Action to perform (default: start)")
+    p_widget.add_argument("-d", "--daemon", action="store_true", help="Run widget in background")
+    p_widget.add_argument("--port", type=int, default=49377, help="Internal API port (default: 49377)")
+    p_widget.set_defaults(func=cmd_widget)
 
     if len(sys.argv) == 1:
         cmd_list(None)

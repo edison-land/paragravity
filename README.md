@@ -3,11 +3,12 @@
 > **Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity.**  
 > Run multiple Google Gemini Pro accounts side-by-side in independent, isolated windows on macOS and Windows.
 
-English | [简体中文](README_zh.md)
+English | [简体中文](README_zh.md) | [Website / Docs](https://edison-land.github.io/paragravity)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey.svg)]()
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-yellow.svg)]()
+[![Follow on X](https://img.shields.io/badge/X-@Edison__aware-black?logo=x)](https://x.com/Edison_aware)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
 
 ---
