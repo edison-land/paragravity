@@ -503,57 +503,61 @@
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="arch_title">Engineered to Solve Native Limitations</h2>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-        <!-- Card Left: Vanilla Pain (Animation: Recede Backwards in Z-space) -->
-        <div class="apple-card rounded-2xl p-6 sm:p-8 opacity-75" data-scroll-slide="pain-sink">
-          <div class="flex items-center space-x-2 text-[#86868b] mb-6">
-            <span class="w-2.5 h-2.5 rounded-full bg-[#6e6e73]"></span>
-            <h3 class="text-sm font-mono uppercase tracking-wider text-[#86868b]" data-i18n="pain_header">Standard Single-Account Setup</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
+        <!-- Card Left: Vanilla Pain (Symmetrical Level Alignment) -->
+        <div class="apple-card rounded-2xl p-6 sm:p-8 opacity-85 h-full flex flex-col justify-between" data-scroll-slide="arch-left">
+          <div>
+            <div class="flex items-center space-x-2 text-[#86868b] mb-6">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#6e6e73]"></span>
+              <h3 class="text-sm font-mono uppercase tracking-wider text-[#86868b]" data-i18n="pain_header">Standard Single-Account Setup</h3>
+            </div>
+            <ul class="space-y-4 text-xs sm:text-sm text-[#86868b]">
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b1"><strong>Single Quota Ceiling:</strong> Frequent 429 quota exhaustion. Tasks halt while rate limits cooldown.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b2"><strong>Disruptive Account Switching:</strong> Switching accounts forces full sign-out, aborting running agent trajectories.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b3"><strong>Context & Repository Pollution:</strong> Enterprise Workspace code and personal repositories commingle in one environment.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b4"><strong>Blank Slate Friction:</strong> Manually passing data dirs loses custom keybindings, MCP servers, and agent skills.</span>
+              </li>
+            </ul>
           </div>
-          <ul class="space-y-4 text-xs sm:text-sm text-[#86868b]">
-            <li class="flex items-start space-x-3">
-              <span class="text-[#6e6e73] font-mono">&times;</span>
-              <span data-i18n="pain_b1"><strong>Single Quota Ceiling:</strong> Frequent 429 quota exhaustion. Tasks halt while rate limits cooldown.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#6e6e73] font-mono">&times;</span>
-              <span data-i18n="pain_b2"><strong>Disruptive Account Switching:</strong> Switching accounts forces full sign-out, aborting running agent trajectories.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#6e6e73] font-mono">&times;</span>
-              <span data-i18n="pain_b3"><strong>Context & Repository Pollution:</strong> Enterprise Workspace code and personal repositories commingle in one environment.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#6e6e73] font-mono">&times;</span>
-              <span data-i18n="pain_b4"><strong>Blank Slate Friction:</strong> Manually passing data dirs loses custom keybindings, MCP servers, and agent skills.</span>
-            </li>
-          </ul>
         </div>
 
-        <!-- Card Right: ParaGravity Solution (Animation: Ascend & Project Forward) -->
-        <div class="apple-card rounded-2xl p-6 sm:p-8 border-white/[0.2] shadow-2xl" data-scroll-slide="solution-soar">
-          <div class="flex items-center space-x-2 text-[#f5f5f7] mb-6">
-            <span class="w-2.5 h-2.5 rounded-full bg-[#2997ff]"></span>
-            <h3 class="text-sm font-mono uppercase tracking-wider text-white" data-i18n="sol_header">ParaGravity Architecture</h3>
+        <!-- Card Right: ParaGravity Solution (Symmetrical Level Alignment) -->
+        <div class="apple-card rounded-2xl p-6 sm:p-8 border-white/[0.2] shadow-2xl h-full flex flex-col justify-between" data-scroll-slide="arch-right">
+          <div>
+            <div class="flex items-center space-x-2 text-[#f5f5f7] mb-6">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#2997ff]"></span>
+              <h3 class="text-sm font-mono uppercase tracking-wider text-white" data-i18n="sol_header">ParaGravity Architecture</h3>
+            </div>
+            <ul class="space-y-4 text-xs sm:text-sm text-[#d2d2d7]">
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b1"><strong>Multi-Quota Bandwidth:</strong> Each instance connects to its own Google account with an independent quota pool.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b2"><strong>Native Side-by-Side Windows:</strong> Keep corporate and personal accounts running in split screens simultaneously.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b3"><strong>Hardware-Grade Sandbox:</strong> Official Chromium <code>--user-data-dir</code> and POSIX <code>0700</code> permission isolation.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b4"><strong>Zero-Friction Inheritance:</strong> Pass <code>-i</code> to clone settings and link MCP tools while isolating credentials.</span>
+              </li>
+            </ul>
           </div>
-          <ul class="space-y-4 text-xs sm:text-sm text-[#d2d2d7]">
-            <li class="flex items-start space-x-3">
-              <span class="text-[#2997ff] font-mono">&bull;</span>
-              <span data-i18n="sol_b1"><strong>Multi-Quota Bandwidth:</strong> Each instance connects to its own Google account with an independent quota pool.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#2997ff] font-mono">&bull;</span>
-              <span data-i18n="sol_b2"><strong>Native Side-by-Side Windows:</strong> Keep corporate and personal accounts running in split screens simultaneously.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#2997ff] font-mono">&bull;</span>
-              <span data-i18n="sol_b3"><strong>Hardware-Grade Sandbox:</strong> Official Chromium <code>--user-data-dir</code> and POSIX <code>0700</code> permission isolation.</span>
-            </li>
-            <li class="flex items-start space-x-3">
-              <span class="text-[#2997ff] font-mono">&bull;</span>
-              <span data-i18n="sol_b4"><strong>Zero-Friction Inheritance:</strong> Pass <code>-i</code> to clone settings and link MCP tools while isolating credentials.</span>
-            </li>
-          </ul>
         </div>
       </div>
     </section>
@@ -608,9 +612,9 @@
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="specs_title">Pure Engineering. Zero Bloat.</h2>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
         <!-- Stat 1 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-1">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-1">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0 MB</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat1_label">Background RAM</div>
@@ -624,7 +628,7 @@
         </div>
 
         <!-- Stat 2 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-2">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-2">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">100%</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat2_label">Non-Invasive</div>
@@ -638,7 +642,7 @@
         </div>
 
         <!-- Stat 3 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-3">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-3">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0.2s</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat3_label">Spotlight Ready</div>
@@ -652,7 +656,7 @@
         </div>
 
         <!-- Stat 4 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-4">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-4">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0700</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat4_label">POSIX Permissions</div>
@@ -666,7 +670,7 @@
         </div>
 
         <!-- Stat 5 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-5">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-5">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">-i</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat5_label">Inherit Flag</div>
@@ -680,7 +684,7 @@
         </div>
 
         <!-- Stat 6 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-6">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-6">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">Web HUD</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat6_label">Visual Orchestrator</div>
@@ -705,7 +709,7 @@
       <div class="apple-card rounded-2xl p-6 sm:p-8">
         <div class="space-y-6">
           <!-- Command 1 -->
-          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-left">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd1_title">1. Create Profile with Inherited MCP & Settings</span>
               <span class="text-[#86868b]" data-i18n="cmd1_tag">Flag -i</span>
@@ -720,7 +724,7 @@
           </div>
 
           <!-- Command 2 -->
-          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-right">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd2_title">2. Inspect Live PIDs and Linked Google Accounts</span>
               <span class="text-[#86868b]" data-i18n="cmd2_tag">Realtime Status</span>
@@ -735,7 +739,7 @@
           </div>
 
           <!-- Command 3 -->
-          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-left">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd3_title">3. Open Directly into Project Workspace</span>
               <span class="text-[#86868b]" data-i18n="cmd3_tag">Project Path</span>
@@ -746,10 +750,11 @@
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
               </button>
             </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd3_desc">Opens directly into target repository workspace with profile context.</div>
           </div>
 
           <!-- Command 4 -->
-          <div data-scroll-slide="cmd-slide-right">
+          <div data-scroll-slide="cmd-item">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd4_title">4. Launch Zero-Dependency Visual Matrix Console</span>
               <span class="text-[#86868b]" data-i18n="cmd4_tag">Web HUD</span>
@@ -760,6 +765,7 @@
                 <i data-lucide="copy" class="w-3.5 h-3.5"></i>
               </button>
             </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd4_desc">Launches zero-dependency local Web HUD for live process and profile management.</div>
           </div>
         </div>
       </div>
@@ -1040,22 +1046,23 @@
             opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
-          // Section 2: Architecture - Dimension Rift (Pain Sinks vs Solution Soars)
-          // 100% Readable at all times: clear text, gentle 3D depth, ZERO blur
+          // Section 2: Architecture - Perfectly Symmetrical Level Docking (Zero Vertical Discrepancy)
+          case 'arch-left':
           case 'pain-sink':
-            translateY = -35 * signedDist;
-            translateZ = -90 * absDist;
-            rotateX = 10 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.65 + 0.30 * progress, 0.95);
+            translateX = -40 * signedDist;
+            translateY = 40 * signedDist;
+            rotateY = 3 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
+          case 'arch-right':
           case 'solution-soar':
-            translateY = 65 * signedDist;
-            translateZ = 45 * progress;
-            rotateX = -8 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            translateX = 40 * signedDist;
+            translateY = 40 * signedDist;
+            rotateY = -3 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           // Section 3: Agent Setup - Holographic Capsule Expansion
@@ -1072,63 +1079,32 @@
             opacity = Math.min(0.80 + 0.20 * progress, 1);
             break;
 
-          // Section 4: Specs - 3D Hexa-Matrix Staggered Inflow (Zero Blur, All 6 Cards Always Crisp)
+          // Section 4: Specs - Level Horizontal Planes (Row 1 and Row 2 perfectly level)
           case 'bento-1':
-            translateX = -70 * signedDist;
-            translateY = 55 * signedDist;
-            rotateZ = -2.5 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
-            break;
-
           case 'bento-2':
-            translateY = 70 * signedDist;
-            rotateX = 10 * signedDist;
-            scale = 0.88 + 0.12 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
-            break;
-
           case 'bento-3':
-            translateX = 70 * signedDist;
-            translateY = 55 * signedDist;
-            rotateZ = 2.5 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            translateY = 40 * signedDist;
+            rotateX = 5 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
           case 'bento-4':
-            translateX = -50 * signedDist;
-            translateY = 60 * signedDist;
-            rotateZ = -1.8 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
-            break;
-
           case 'bento-5':
-            translateY = 75 * signedDist;
-            scale = 0.88 + 0.12 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
-            break;
-
           case 'bento-6':
-            translateX = 50 * signedDist;
-            translateY = 60 * signedDist;
-            rotateZ = 1.8 * signedDist;
-            scale = 0.90 + 0.10 * progress;
-            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            translateY = 55 * signedDist;
+            rotateX = 5 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
             break;
 
-          // Section 5: Commands - Interlocking Blade Drawers
+          // Section 5: Commands - Symmetrical Unified Alignment (Zero Horizontal Shearing)
+          case 'cmd-item':
           case 'cmd-slide-left':
-            translateX = -90 * signedDist;
-            scale = 0.92 + 0.08 * progress;
-            opacity = Math.min(0.75 + 0.25 * progress, 1);
-            break;
-
           case 'cmd-slide-right':
-            translateX = 90 * signedDist;
-            scale = 0.92 + 0.08 * progress;
-            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            translateY = 25 * signedDist;
+            scale = 0.96 + 0.04 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
             break;
 
           // Section 6: FAQ - 3D Folding Deck Fan
@@ -1287,8 +1263,10 @@
         cmd2_desc: "Lists running instances, process status, and linked Google accounts.",
         cmd3_title: "3. Open Directly into Project Workspace",
         cmd3_tag: "Project Path",
+        cmd3_desc: "Opens directly into target repository workspace with profile context.",
         cmd4_title: "4. Launch Zero-Dependency Visual Matrix Console",
         cmd4_tag: "Web HUD",
+        cmd4_desc: "Launches zero-dependency local Web HUD for live process and profile management.",
         faq_eyebrow: "QUESTIONS & ANSWERS",
         faq_title: "Frequently Asked Questions",
         faq_q1: "Does this violate Google ToS or risk banning my accounts?",
@@ -1387,8 +1365,10 @@
         cmd2_desc: "列出当前运行进程 PID、沙箱目录及绑定的 Google 邮箱。",
         cmd3_title: "3. 指定项目工作目录直接唤起实例",
         cmd3_tag: "项目路径直达",
+        cmd3_desc: "直接携带项目工作目录路径启动沙箱，自动切换并载入指定工程。",
         cmd4_title: "4. 唤起零依赖的可视化矩阵控制台",
         cmd4_tag: "Web HUD 控制台",
+        cmd4_desc: "一键启动本地轻量 Web 管理界面，支持实例拓扑监控与一键平铺编排。",
         faq_eyebrow: "答疑解惑",
         faq_title: "常见问题解答",
         faq_q1: "使用这个工具会违反 Google 规则或导致封号吗？",
