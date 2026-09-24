@@ -115,6 +115,10 @@
       background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     /* Scroll presentation components */
     [data-scroll-slide] {
       will-change: transform, opacity, filter;
@@ -124,6 +128,53 @@
     .headline-wrap {
       word-break: keep-all;
       overflow-wrap: normal;
+    }
+
+    /* Dynamic Active Header Pill in Navbar */
+    .nav-item {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .nav-item.active {
+      color: #ffffff !important;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 0 14px rgba(41, 151, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+
+    /* ========================================== */
+    /* Language Morph Transition Engine          */
+    /* Smooth Apple Keynote Dissolve & Float      */
+    /* ========================================== */
+    .lang-fade-out {
+      opacity: 0 !important;
+      transform: translateY(-8px) scale(0.99) !important;
+      filter: blur(4px) !important;
+      transition: opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                  transform 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                  filter 0.16s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+
+    .lang-fade-in-prep {
+      opacity: 0 !important;
+      transform: translateY(8px) scale(0.99) !important;
+      filter: blur(4px) !important;
+      transition: none !important;
+    }
+
+    .lang-fade-in-active {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      filter: blur(0px) !important;
+      transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  filter 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    #lang-toggle {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #lang-toggle:active {
+      transform: scale(0.92);
     }
   </style>
 </head>
@@ -147,16 +198,16 @@
         </div>
       </a>
 
-      <!-- Center Links (Apple SF Pro Font) -->
-      <nav class="hidden md:flex items-center space-x-8 text-sm font-medium text-[#86868b]">
-        <a href="#overview" class="hover:text-white transition-colors" data-i18n="nav_overview">Overview</a>
-        <a href="#architecture" class="hover:text-white transition-colors" data-i18n="nav_architecture">Architecture</a>
-        <a href="#agent-setup" class="hover:text-white transition-colors text-[#2997ff] flex items-center space-x-1">
+      <!-- Center Links (Apple SF Pro Font) with Dynamic Active Indicator -->
+      <nav id="nav-menu" class="hidden md:flex items-center space-x-1 sm:space-x-1.5 text-xs sm:text-sm font-medium p-1 rounded-full bg-white/[0.04] border border-white/[0.08] backdrop-blur-xl">
+        <a href="#overview" data-nav="overview" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_overview">Overview</a>
+        <a href="#architecture" data-nav="architecture" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_architecture">Architecture</a>
+        <a href="#agent-setup" data-nav="agent-setup" class="nav-item px-3.5 py-1.5 rounded-full text-[#2997ff] hover:text-white flex items-center space-x-1">
           <span data-i18n="nav_agent">Agent Prompt</span>
         </a>
-        <a href="#specs" class="hover:text-white transition-colors" data-i18n="nav_specs">Specifications</a>
-        <a href="#cheatsheet" class="hover:text-white transition-colors" data-i18n="nav_commands">Commands</a>
-        <a href="#faq" class="hover:text-white transition-colors" data-i18n="nav_faq">FAQ</a>
+        <a href="#specs" data-nav="specs" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_specs">Specifications</a>
+        <a href="#cheatsheet" data-nav="cheatsheet" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_commands">Commands</a>
+        <a href="#faq" data-nav="faq" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_faq">FAQ</a>
       </nav>
 
       <!-- Right Action Items (Icon Only for GitHub as requested) -->
@@ -272,14 +323,14 @@
     <!-- SECTION 1: Multi-Instance Showcase (+40% Exaggerated Slide-in) -->
     <section id="overview" class="py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
       <!-- Section Tag -->
-      <div class="text-center mb-10" data-scroll-slide="center">
+      <div class="text-center mb-10" data-scroll-slide="section-header">
         <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="showcase_eyebrow">CONCURRENT MULTI-ACCOUNT WORKFLOW</span>
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="showcase_title">Independent Sandboxes. Zero Quota Interruption.</h2>
         <p class="text-sm text-[#86868b] mt-2" data-i18n="showcase_sub">Keep multiple Google accounts open simultaneously with completely separate rate limits.</p>
       </div>
 
       <!-- Active Profile Pill Bar -->
-      <div class="mb-5 apple-card rounded-2xl p-4 sm:px-6 sm:py-3.5 flex flex-wrap items-center justify-between text-xs font-mono" data-scroll-slide="center">
+      <div class="mb-5 apple-card rounded-2xl p-4 sm:px-6 sm:py-3.5 flex flex-wrap items-center justify-between text-xs font-mono" data-scroll-slide="banner-pill">
         <div class="flex items-center space-x-3 text-[#d2d2d7]">
           <span class="px-2 py-0.5 rounded bg-white/[0.1] text-white font-semibold">Cmd + Space</span>
           <span data-i18n="spotlight_banner">Spotlight: Type "Antigravity (work)" or "Antigravity (personal)" &bull; Instant 0.2s launch</span>
@@ -293,7 +344,7 @@
       <!-- Split Windows: Left slides from left, Right slides from right (Exaggerated +40%) -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Work Profile Window (Slide from Left) -->
-        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="left">
+        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="split-left">
           <div>
             <!-- Window Topbar -->
             <div class="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-4">
@@ -326,7 +377,7 @@
         </div>
 
         <!-- Personal Profile Window (Slide from Right) -->
-        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="right">
+        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="split-right">
           <div>
             <!-- Window Topbar -->
             <div class="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-4">
@@ -362,14 +413,14 @@
 
     <!-- SECTION 2: Architecture / Pain vs Solution (Exaggerated Recede vs Elevate) -->
     <section id="architecture" class="py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-      <div class="text-center mb-16" data-scroll-slide="center">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
         <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="arch_eyebrow">THE ARCHITECTURAL DIFFERENCE</span>
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="arch_title">Engineered to Solve Native Limitations</h2>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
         <!-- Card Left: Vanilla Pain (Animation: Recede Backwards in Z-space) -->
-        <div class="apple-card rounded-2xl p-6 sm:p-8 opacity-75" data-scroll-slide="recede">
+        <div class="apple-card rounded-2xl p-6 sm:p-8 opacity-75" data-scroll-slide="pain-sink">
           <div class="flex items-center space-x-2 text-[#86868b] mb-6">
             <span class="w-2.5 h-2.5 rounded-full bg-[#6e6e73]"></span>
             <h3 class="text-sm font-mono uppercase tracking-wider text-[#86868b]" data-i18n="pain_header">Standard Single-Account Setup</h3>
@@ -395,7 +446,7 @@
         </div>
 
         <!-- Card Right: ParaGravity Solution (Animation: Ascend & Project Forward) -->
-        <div class="apple-card rounded-2xl p-6 sm:p-8 border-white/[0.2] shadow-2xl" data-scroll-slide="elevate">
+        <div class="apple-card rounded-2xl p-6 sm:p-8 border-white/[0.2] shadow-2xl" data-scroll-slide="solution-soar">
           <div class="flex items-center space-x-2 text-[#f5f5f7] mb-6">
             <span class="w-2.5 h-2.5 rounded-full bg-[#2997ff]"></span>
             <h3 class="text-sm font-mono uppercase tracking-wider text-white" data-i18n="sol_header">ParaGravity Architecture</h3>
@@ -424,7 +475,7 @@
 
     <!-- SECTION 3: Agent Automation Section (Relative Link to agent.md) -->
     <section id="agent-setup" class="py-20 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
-      <div class="apple-card rounded-3xl p-8 sm:p-12 specular-highlight border-white/[0.15]" data-scroll-slide="center">
+      <div class="apple-card rounded-3xl p-8 sm:p-12 specular-highlight border-white/[0.15]" data-scroll-slide="agent-card">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-white/[0.08]">
           <div>
             <div class="inline-flex items-center space-x-2 text-xs font-mono text-[#2997ff] mb-2">
@@ -452,7 +503,7 @@
         </div>
 
         <!-- Formatted Agent Prompt Preview -->
-        <div class="mt-6 p-4 rounded-xl bg-black/80 border border-white/[0.06] font-mono text-xs text-[#d2d2d7] leading-relaxed">
+        <div class="mt-6 p-4 rounded-xl bg-black/80 border border-white/[0.06] font-mono text-xs text-[#d2d2d7] leading-relaxed relative overflow-hidden" data-scroll-slide="agent-preview">
           <div class="text-[#86868b] select-none mb-2" data-i18n="agent_preview_header">// Copy-paste ready for your AI Agent:</div>
           <p id="agent-prompt-text" class="text-[#f5f5f7]">Please configure ParaGravity for me to enable parallel Google Antigravity multi-account execution:
 1. Read the setup spec at: https://raw.githubusercontent.com/edison-land/paragravity/main/docs/agent.md
@@ -467,14 +518,14 @@
 
     <!-- SECTION 4: Technical Specifications Bento Grid (+40% Cascade 3D Motion) -->
     <section id="specs" class="py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
-      <div class="text-center mb-16" data-scroll-slide="center">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
         <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="specs_eyebrow">TECHNICAL BENCHMARKS</span>
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="specs_title">Pure Engineering. Zero Bloat.</h2>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <!-- Stat 1 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-1">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-1">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0 MB</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat1_label">Background RAM</div>
@@ -488,7 +539,7 @@
         </div>
 
         <!-- Stat 2 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-2">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-2">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">100%</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat2_label">Non-Invasive</div>
@@ -502,7 +553,7 @@
         </div>
 
         <!-- Stat 3 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-3">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-3">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0.2s</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat3_label">Spotlight Ready</div>
@@ -516,7 +567,7 @@
         </div>
 
         <!-- Stat 4 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-1">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-4">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0700</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat4_label">POSIX Permissions</div>
@@ -530,7 +581,7 @@
         </div>
 
         <!-- Stat 5 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-2">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-5">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">-i</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat5_label">Inherit Flag</div>
@@ -544,7 +595,7 @@
         </div>
 
         <!-- Stat 6 -->
-        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="cascade-3">
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between" data-scroll-slide="bento-6">
           <div>
             <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">Web HUD</div>
             <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat6_label">Visual Orchestrator</div>
@@ -561,15 +612,15 @@
 
     <!-- SECTION 5: CLI Commands -->
     <section id="cheatsheet" class="py-20 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
-      <div class="text-center mb-16" data-scroll-slide="center">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
         <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="cli_eyebrow">COMMAND LINE INTERFACE</span>
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="cli_title">Designed for Developer Velocity</h2>
       </div>
 
-      <div class="apple-card rounded-2xl p-6 sm:p-8" data-scroll-slide="center">
+      <div class="apple-card rounded-2xl p-6 sm:p-8">
         <div class="space-y-6">
           <!-- Command 1 -->
-          <div class="border-b border-white/[0.06] pb-5">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-left">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd1_title">1. Create Profile with Inherited MCP & Settings</span>
               <span class="text-[#86868b]" data-i18n="cmd1_tag">Flag -i</span>
@@ -584,7 +635,7 @@
           </div>
 
           <!-- Command 2 -->
-          <div class="border-b border-white/[0.06] pb-5">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-right">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd2_title">2. Inspect Live PIDs and Linked Google Accounts</span>
               <span class="text-[#86868b]" data-i18n="cmd2_tag">Realtime Status</span>
@@ -599,7 +650,7 @@
           </div>
 
           <!-- Command 3 -->
-          <div class="border-b border-white/[0.06] pb-5">
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-slide-left">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd3_title">3. Open Directly into Project Workspace</span>
               <span class="text-[#86868b]" data-i18n="cmd3_tag">Project Path</span>
@@ -613,7 +664,7 @@
           </div>
 
           <!-- Command 4 -->
-          <div>
+          <div data-scroll-slide="cmd-slide-right">
             <div class="flex items-center justify-between text-xs font-mono mb-2">
               <span class="text-white font-medium" data-i18n="cmd4_title">4. Launch Zero-Dependency Visual Matrix Console</span>
               <span class="text-[#86868b]" data-i18n="cmd4_tag">Web HUD</span>
@@ -631,14 +682,14 @@
 
     <!-- SECTION 6: FAQ -->
     <section id="faq" class="py-20 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-      <div class="text-center mb-16" data-scroll-slide="center">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
         <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="faq_eyebrow">QUESTIONS & ANSWERS</span>
         <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="faq_title">Frequently Asked Questions</h2>
       </div>
 
       <div class="space-y-4">
         <!-- Q1 -->
-        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="center">
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-1">
           <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
             <span data-i18n="faq_q1">Does this violate Google ToS or risk banning my accounts?</span>
             <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
@@ -649,7 +700,7 @@
         </details>
 
         <!-- Q2 -->
-        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="center">
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-2">
           <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
             <span data-i18n="faq_q2">Are my Google OAuth tokens and credentials secure?</span>
             <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
@@ -660,7 +711,7 @@
         </details>
 
         <!-- Q3 -->
-        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="center">
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-3">
           <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
             <span data-i18n="faq_q3">Can I inherit my keybindings and MCP servers?</span>
             <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
@@ -671,7 +722,7 @@
         </details>
 
         <!-- Q4 -->
-        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="center">
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-4">
           <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
             <span data-i18n="faq_q4">Is Windows supported?</span>
             <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
@@ -684,8 +735,8 @@
     </section>
 
     <!-- SECTION 7: Call to Action -->
-    <section class="py-24 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto text-center" data-scroll-slide="center">
-      <div class="apple-card rounded-3xl p-10 sm:p-14 specular-highlight">
+    <section class="py-24 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto text-center">
+      <div class="apple-card rounded-3xl p-10 sm:p-14 specular-highlight" data-scroll-slide="cta-card">
         <h3 class="text-3xl sm:text-4xl font-semibold text-white tracking-apple-tight mb-4" data-i18n="cta_title">
           Ready to scale your agent workflow?
         </h3>
@@ -820,86 +871,248 @@
 
     // ==========================================
     // Real-Time Multi-Dimensional Scroll Engine
-    // +40% Exaggerated Physical Keynote Motion
+    // Tailored Physical 3D Motions per Section
+    // Dynamic Navbar Active Indicator Tracking
     // ==========================================
     const scrollElements = document.querySelectorAll('[data-scroll-slide]');
+    const navItems = document.querySelectorAll('.nav-item');
+    const sections = ['overview', 'architecture', 'agent-setup', 'specs', 'cheatsheet', 'faq']
+      .map(id => document.getElementById(id))
+      .filter(Boolean);
 
     function updateScrollEffects() {
       const vh = window.innerHeight;
+      const viewportCenter = vh / 2;
 
+      // 1. Dynamic Navbar Active Tracker
+      let closestSectionId = '';
+      let minDistance = Infinity;
+
+      sections.forEach(sec => {
+        const rect = sec.getBoundingClientRect();
+        const secCenter = rect.top + rect.height / 2;
+        const dist = Math.abs(secCenter - viewportCenter);
+        if (dist < minDistance && rect.top < vh * 0.75 && rect.bottom > vh * 0.25) {
+          minDistance = dist;
+          closestSectionId = sec.id;
+        }
+      });
+
+      navItems.forEach(item => {
+        const target = item.getAttribute('data-nav');
+        if (target === closestSectionId) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+
+      // 2. Real-Time Multi-Dimensional Scroll Engine
       scrollElements.forEach(el => {
         const rect = el.getBoundingClientRect();
         const type = el.getAttribute('data-scroll-slide');
+        const elCenter = rect.top + rect.height / 2;
 
-        // Smooth entry & exit zone
-        const entryThreshold = vh * 0.42;
-        const exitThreshold = vh * 0.38;
-
-        const entryRatio = Math.min(Math.max((vh - rect.top) / entryThreshold, 0), 1);
-        const exitRatio = Math.min(Math.max(rect.bottom / exitThreshold, 0), 1);
-        const progress = Math.min(entryRatio, exitRatio);
-        const invProgress = 1 - progress;
+        // Continuous reversible signed distance from viewport center:
+        // 0 when centered, +1 when 65% vh below (entering), -1 when 65% vh above (exiting)
+        const maxDist = vh * 0.65;
+        const signedDist = Math.min(Math.max((elCenter - viewportCenter) / maxDist, -1.2), 1.2);
+        const absDist = Math.min(Math.abs(signedDist), 1);
+        const progress = 1 - absDist;
 
         let translateX = 0;
         let translateY = 0;
+        let translateZ = 0;
+        let rotateX = 0;
         let rotateY = 0;
+        let rotateZ = 0;
         let scale = 1;
         let opacity = 1;
         let blur = 0;
 
-        if (type === 'left') {
-          // Slide in from left with enhanced 3D tilt (+40% boosted)
-          translateX = -120 * invProgress;
-          rotateY = 8.5 * invProgress;
-          scale = 0.88 + 0.12 * progress;
-          opacity = Math.min(progress * 1.35, 1);
-          blur = invProgress * 6;
-        } else if (type === 'right') {
-          // Slide in from right with opposing 3D tilt (+40% boosted)
-          translateX = 120 * invProgress;
-          rotateY = -8.5 * invProgress;
-          scale = 0.88 + 0.12 * progress;
-          opacity = Math.min(progress * 1.35, 1);
-          blur = invProgress * 6;
-        } else if (type === 'recede') {
-          // Pain point card: Recedes deep into background (+40% boosted)
-          translateY = -45 * invProgress;
-          scale = 0.86 + 0.12 * progress;
-          opacity = 0.15 + 0.60 * progress;
-          blur = invProgress * 5;
-        } else if (type === 'elevate') {
-          // Solution card: Ascends heroically towards the user (+40% boosted)
-          translateY = 95 * invProgress;
-          scale = 0.86 + 0.14 * progress;
-          opacity = Math.min(progress * 1.45, 1);
-          blur = invProgress * 7;
-        } else if (type === 'cascade-1') {
-          // Bento Card 1: Slide from bottom-left (+40% boosted)
-          translateX = -60 * invProgress;
-          translateY = 65 * invProgress;
-          scale = 0.86 + 0.14 * progress;
-          opacity = Math.min(progress * 1.35, 1);
-        } else if (type === 'cascade-2') {
-          // Bento Card 2: Center zoom (+40% boosted)
-          translateY = 80 * invProgress;
-          scale = 0.82 + 0.18 * progress;
-          opacity = Math.min(progress * 1.35, 1);
-        } else if (type === 'cascade-3') {
-          // Bento Card 3: Slide from bottom-right (+40% boosted)
-          translateX = 60 * invProgress;
-          translateY = 65 * invProgress;
-          scale = 0.86 + 0.14 * progress;
-          opacity = Math.min(progress * 1.35, 1);
-        } else if (type === 'center') {
-          // Dramatic vertical rise (+40% boosted)
-          translateY = 55 * invProgress;
-          scale = 0.90 + 0.10 * progress;
-          opacity = Math.min(progress * 1.35, 1);
+        switch (type) {
+          // Section 1: Overview - 3D Flight & Symmetrical Docking
+          case 'split-left':
+            translateX = -160 * signedDist;
+            translateY = 30 * absDist;
+            rotateY = 16 * signedDist;
+            rotateZ = -2.5 * signedDist;
+            scale = 0.85 + 0.15 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 6;
+            break;
+
+          case 'split-right':
+            translateX = 160 * signedDist;
+            translateY = 30 * absDist;
+            rotateY = -16 * signedDist;
+            rotateZ = 2.5 * signedDist;
+            scale = 0.85 + 0.15 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 6;
+            break;
+
+          case 'banner-pill':
+            translateY = 40 * signedDist;
+            scale = 0.9 + 0.1 * progress;
+            opacity = Math.min(progress * 1.6, 1);
+            break;
+
+          // Section 2: Architecture - Dimension Rift (Pain Sinks vs Solution Soars)
+          case 'pain-sink':
+            translateY = -50 * signedDist;
+            translateZ = -180 * absDist;
+            rotateX = 16 * signedDist;
+            scale = 0.82 + 0.18 * progress;
+            opacity = 0.2 + 0.65 * progress;
+            blur = absDist * 5;
+            break;
+
+          case 'solution-soar':
+            translateY = 90 * signedDist;
+            translateZ = 60 * progress;
+            rotateX = -10 * signedDist;
+            scale = 0.86 + 0.16 * progress;
+            opacity = Math.min(progress * 1.6, 1);
+            blur = absDist * 7;
+            break;
+
+          // Section 3: Agent Setup - Holographic Capsule Expansion
+          case 'agent-card':
+            translateY = 70 * signedDist;
+            rotateX = 12 * signedDist;
+            scale = 0.84 + 0.16 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 6;
+            break;
+
+          case 'agent-preview':
+            translateY = 45 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(progress * 1.7, 1);
+            break;
+
+          // Section 4: Specs - 3D Hexa-Matrix Staggered Inflow
+          case 'bento-1':
+            translateX = -90 * signedDist;
+            translateY = 75 * signedDist;
+            rotateZ = -4 * signedDist;
+            scale = 0.84 + 0.16 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 5;
+            break;
+
+          case 'bento-2':
+            translateY = 95 * signedDist;
+            rotateX = 14 * signedDist;
+            scale = 0.80 + 0.20 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 6;
+            break;
+
+          case 'bento-3':
+            translateX = 90 * signedDist;
+            translateY = 75 * signedDist;
+            rotateZ = 4 * signedDist;
+            scale = 0.84 + 0.16 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 5;
+            break;
+
+          case 'bento-4':
+            translateX = -70 * signedDist;
+            translateY = 85 * signedDist;
+            rotateZ = -2.5 * signedDist;
+            scale = 0.85 + 0.15 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 5;
+            break;
+
+          case 'bento-5':
+            translateY = 105 * signedDist;
+            scale = 0.82 + 0.18 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 6;
+            break;
+
+          case 'bento-6':
+            translateX = 70 * signedDist;
+            translateY = 85 * signedDist;
+            rotateZ = 2.5 * signedDist;
+            scale = 0.85 + 0.15 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 5;
+            break;
+
+          // Section 5: Commands - Interlocking Blade Drawers
+          case 'cmd-slide-left':
+            translateX = -120 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(progress * 1.6, 1);
+            blur = absDist * 4;
+            break;
+
+          case 'cmd-slide-right':
+            translateX = 120 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(progress * 1.6, 1);
+            blur = absDist * 4;
+            break;
+
+          // Section 6: FAQ - 3D Folding Deck Fan
+          case 'faq-1':
+            translateY = 45 * signedDist;
+            rotateX = 12 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            break;
+
+          case 'faq-2':
+            translateY = 65 * signedDist;
+            rotateX = 16 * signedDist;
+            scale = 0.89 + 0.11 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            break;
+
+          case 'faq-3':
+            translateY = 85 * signedDist;
+            rotateX = 20 * signedDist;
+            scale = 0.86 + 0.14 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            break;
+
+          case 'faq-4':
+            translateY = 105 * signedDist;
+            rotateX = 24 * signedDist;
+            scale = 0.83 + 0.17 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            break;
+
+          // Section Header titles: elegant downward tracking expansion
+          case 'section-header':
+            translateY = -35 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(progress * 1.6, 1);
+            break;
+
+          // Call to Action Card
+          case 'cta-card':
+            translateY = 70 * signedDist;
+            scale = 0.86 + 0.14 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            blur = absDist * 5;
+            break;
+
+          default:
+            translateY = 50 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(progress * 1.5, 1);
+            break;
         }
 
-        el.style.transform = `perspective(850px) translate3d(${translateX.toFixed(2)}px, ${translateY.toFixed(2)}px, 0) rotateY(${rotateY.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+        el.style.transform = `perspective(1000px) translate3d(${translateX.toFixed(1)}px, ${translateY.toFixed(1)}px, ${translateZ.toFixed(1)}px) rotateX(${rotateX.toFixed(1)}deg) rotateY(${rotateY.toFixed(1)}deg) rotateZ(${rotateZ.toFixed(1)}deg) scale(${scale.toFixed(3)})`;
         el.style.opacity = Math.max(opacity, 0).toFixed(3);
-        el.style.filter = blur > 0.2 ? `blur(${blur.toFixed(1)}px)` : 'none';
+        el.style.filter = blur > 0.3 ? `blur(${blur.toFixed(1)}px)` : 'none';
       });
     }
 
@@ -1126,6 +1339,7 @@
     };
 
     let currentLang = 'en';
+    let isLangTransitioning = false;
 
     function setLanguage(lang) {
       currentLang = lang;
@@ -1146,9 +1360,57 @@
       document.getElementById('agent-prompt-text').innerText = lang === 'en' ? agentPromptEN : agentPromptZH;
     }
 
-    document.getElementById('lang-toggle').addEventListener('click', () => {
-      setLanguage(currentLang === 'en' ? 'zh' : 'en');
-    });
+    function toggleLanguage() {
+      if (isLangTransitioning) return;
+      isLangTransitioning = true;
+
+      const nextLang = currentLang === 'en' ? 'zh' : 'en';
+      const langToggleBtn = document.getElementById('lang-toggle');
+      const globeIcon = langToggleBtn ? langToggleBtn.querySelector('i') : null;
+
+      if (globeIcon) {
+        globeIcon.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+        globeIcon.style.transform = nextLang === 'zh' ? 'rotate(180deg)' : 'rotate(0deg)';
+      }
+
+      // Collect translatable elements across the document
+      const translatableElements = document.querySelectorAll(
+        '[data-i18n], #install-cmd, #prompt-prefix, #agent-prompt-text, #lang-label, #box-helper-text, #terminal-mode-label'
+      );
+
+      // Phase 1: Graceful dissolve out with blur and micro-lift
+      translatableElements.forEach(el => el.classList.add('lang-fade-out'));
+
+      setTimeout(() => {
+        // Phase 2: Update content while invisible
+        setLanguage(nextLang);
+
+        // Phase 3: Prepare from below
+        translatableElements.forEach(el => {
+          el.classList.remove('lang-fade-out');
+          el.classList.add('lang-fade-in-prep');
+        });
+
+        // Force browser layout reflow
+        void document.body.offsetHeight;
+
+        // Phase 4: Animate in with Apple keynote spring ease
+        requestAnimationFrame(() => {
+          translatableElements.forEach(el => {
+            el.classList.remove('lang-fade-in-prep');
+            el.classList.add('lang-fade-in-active');
+          });
+
+          setTimeout(() => {
+            translatableElements.forEach(el => el.classList.remove('lang-fade-in-active'));
+            isLangTransitioning = false;
+            updateScrollEffects();
+          }, 320);
+        });
+      }, 160);
+    }
+
+    document.getElementById('lang-toggle').addEventListener('click', toggleLanguage);
   </script>
 </body>
 </html>
