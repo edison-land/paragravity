@@ -345,7 +345,9 @@ class ProcessManagementTests(unittest.TestCase):
                 self.assertIn("currently running", result.stderr + result.stdout)
                 self.assertTrue((profiles / "grp").exists())
             finally:
-                run_cli(["stop", "grp"], env)
+                # --force: the .cmd fake can't answer taskkill's graceful
+                # request (no window), and cleanup must guarantee death.
+                run_cli(["stop", "grp", "--force"], env)
 
     @unittest.skipUnless(IS_DARWIN, "multi-instance process groups verified on macOS")
     def test_multi_instance_concurrency_and_isolation(self):
@@ -442,7 +444,7 @@ class NewFeatureTests(unittest.TestCase):
                 self.assertIn("fake-app-started", result.stdout)
                 self.assertIn("booting-language-server", result.stdout)
             finally:
-                run_cli(["stop", "lg"], env)
+                run_cli(["stop", "lg", "--force"], env)
 
     def test_logs_without_launches_is_friendly(self):
         with sandbox_home() as (_, env):

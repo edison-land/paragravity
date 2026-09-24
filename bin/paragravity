@@ -1149,7 +1149,7 @@ def cmd_stop(args):
                     print(f"{COLOR_RED}Error: could not stop profile '{name}' (PID {pid}).{COLOR_RESET}", file=sys.stderr)
                 else:
                     print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
-                return
+                sys.exit(1)
             (profile_dir / "run.pid").unlink(missing_ok=True)
             print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
             return
@@ -1222,7 +1222,7 @@ def cmd_stop(args):
                     print(f"{COLOR_RED}Error: could not stop profile '{name}' even with --force.{COLOR_RESET}", file=sys.stderr)
                 else:
                     print(f"{COLOR_RED}Profile '{name}' is still running; try: paragravity stop {name} --force{COLOR_RESET}")
-                return
+                sys.exit(1)
         (profile_dir / "run.pid").unlink(missing_ok=True)
         print(f"{COLOR_GREEN}✓ Profile '{name}' stopped.{COLOR_RESET}")
     except Exception as e:
