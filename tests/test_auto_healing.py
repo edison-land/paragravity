@@ -264,9 +264,13 @@ class DoctorCliIntegrationTests(unittest.TestCase):
     def test_launch_command_auto_heals_stale_locks(self):
         with sandbox_home() as (home, env):
             # Create a mock antigravity binary that echoes and exits
-            mock_bin = home / "mock_antigravity"
-            mock_bin.write_text("#!/bin/sh\nexit 0\n")
-            mock_bin.chmod(0o755)
+            if IS_WINDOWS:
+                mock_bin = home / "mock_antigravity.cmd"
+                mock_bin.write_text("@echo off\nexit /b 0\n")
+            else:
+                mock_bin = home / "mock_antigravity"
+                mock_bin.write_text("#!/bin/sh\nexit 0\n")
+                mock_bin.chmod(0o755)
             env["ANTIGRAVITY_BIN"] = str(mock_bin)
 
             profiles_dir = Path(env["PARAGRAVITY_PROFILES_DIR"])
