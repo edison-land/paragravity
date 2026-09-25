@@ -144,18 +144,26 @@ pgrav logs zwe -f      # follow live output
 pgrav logs zwe -n 200  # last 200 lines
 ```
 
-### 6. Inspect Profile Details
+### 6. Health Doctor & Auto-Healing
+When Google AntiGravity updates, ParaGravity automatically heals profiles upon launch. You can also run the health doctor anytime to inspect or repair stale locks, bytecode caches, and update isolation:
+```bash
+pgrav doctor          # Diagnose all profiles and check AntiGravity version compatibility
+pgrav doctor --fix    # Auto-repair stale locks, refresh bytecode caches, and isolate updaters
+pgrav doctor --json   # Output machine-readable JSON for monitoring and CI
+```
+
+### 7. Inspect Profile Details
 ```bash
 pgrav info zwe
 # scripts/CI: pgrav info zwe --json
 ```
 
-### 7. Delete a Profile
+### 8. Delete a Profile
 ```bash
 pgrav delete zwe
 ```
 
-### 8. Modern Web Console & Floating Widget
+### 9. Modern Web Console & Floating Widget
 Manage all your instances visually with zero dependencies:
 ```bash
 # Launch full Web Console (Matrix grid, batch controls, macOS window tiling)

@@ -470,7 +470,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
             return
         elif path == "/api/system":
             self.send_json({
-                "version": "1.1.0",
+                "version": "1.2.0",
                 "theme": "dawn-iris",
                 "themeName": "晨曦紫霞白 (Dawn Iris & Violet)",
                 "platform": sys.platform,
