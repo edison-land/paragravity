@@ -22,7 +22,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 IS_WINDOWS = sys.platform == "win32"
 IS_DARWIN = sys.platform == "darwin"
@@ -285,6 +285,223 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
             pass
 
     return 0
+
+def get_canonical_cli_path() -> Path:
+    """Find the canonical executable path for paragravity CLI."""
+    user_installed = Path.home() / ".paragravity" / "bin" / "paragravity"
+    if user_installed.is_file() and os.access(user_installed, os.X_OK):
+        return user_installed
+    which_pgrav = shutil.which("paragravity") or shutil.which("pgrav")
+    if which_pgrav:
+        try:
+            resolved = Path(which_pgrav).resolve()
+            if resolved.is_file():
+                return resolved
+        except Exception:
+            pass
+    return Path(__file__).resolve()
+
+def get_installed_app_version(app_bin: Optional[str] = None) -> Optional[str]:
+    """Detect current installed version of Google Antigravity binary."""
+    if not app_bin:
+        app_bin = get_app_binary()
+    if not app_bin or not os.path.exists(app_bin):
+        return None
+
+    if IS_DARWIN:
+        bin_path = Path(app_bin).resolve()
+        plist_candidates = [
+            bin_path.parent.parent / "Info.plist",
+            Path("/Applications/Antigravity.app/Contents/Info.plist"),
+            Path.home() / "Applications/Antigravity.app/Contents/Info.plist",
+        ]
+        import plistlib
+        for plist_path in plist_candidates:
+            if plist_path.is_file():
+                try:
+                    with open(plist_path, "rb") as f:
+                        pl = plistlib.load(f)
+                        ver = pl.get("CFBundleShortVersionString") or pl.get("CFBundleVersion")
+                        if ver:
+                            return str(ver).strip()
+                except Exception:
+                    pass
+
+    elif IS_WINDOWS:
+        try:
+            ps_cmd = f"(Get-Item -LiteralPath '{app_bin}').VersionInfo.ProductVersion"
+            res = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip().split()[0]
+        except Exception:
+            pass
+
+    else:
+        try:
+            res = subprocess.run([app_bin, "--version"], capture_output=True, text=True, timeout=5)
+            if res.returncode == 0 and res.stdout.strip():
+                return res.stdout.strip().splitlines()[0].strip()
+        except Exception:
+            pass
+
+    return None
+
+def clean_stale_locks(profile_dir: Path, data_dir: Optional[Path] = None) -> list[str]:
+    """
+    Clean stale Chromium/Electron lock files and socket handles if no active process is running.
+    Zero data loss: never removes cookies, tokens, or local storage.
+    """
+    if data_dir is None:
+        data_dir = profile_dir / "data"
+
+    pid_file = profile_dir / "run.pid"
+    had_pid_file = pid_file.exists()
+
+    if get_profile_process(profile_dir, data_dir) > 0:
+        return []
+
+    cleaned = []
+    lock_targets = [
+        data_dir / "SingletonLock",
+        data_dir / "SingletonSocket",
+        data_dir / "SingletonCookie",
+        data_dir / "DevToolsActivePort",
+        profile_dir / "run.pid",
+    ]
+    for target in lock_targets:
+        if os.path.lexists(str(target)):
+            try:
+                target.unlink(missing_ok=True)
+                cleaned.append(target.name)
+            except OSError:
+                pass
+    if had_pid_file and "run.pid" not in cleaned:
+        cleaned.append("run.pid")
+    return cleaned
+
+def suppress_sandbox_autoupdate(profile_dir: Path) -> bool:
+    """
+    Disable auto-updater within profile sandbox to prevent quitAndInstall() collisions.
+    1. Sets autoCheckForUpdates=false in data/app_storage.json (Electron StorageManager).
+    2. Sets update.mode=none in data/User/settings.json (VS Code engine).
+    Preserves all other settings, logins, and conversation data.
+    """
+    modified = False
+    data_dir = profile_dir / "data"
+
+    # 1. app_storage.json
+    app_storage = data_dir / "app_storage.json"
+    try:
+        data = {}
+        if app_storage.is_file():
+            try:
+                data = json.loads(app_storage.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        if data.get("autoCheckForUpdates") != "false":
+            data["autoCheckForUpdates"] = "false"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            app_storage.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            if not IS_WINDOWS:
+                try:
+                    os.chmod(app_storage, 0o600)
+                except OSError:
+                    pass
+            modified = True
+    except OSError:
+        pass
+
+    # 2. data/User/settings.json
+    user_settings = data_dir / "User" / "settings.json"
+    try:
+        sdata = {}
+        if user_settings.is_file():
+            try:
+                sdata = json.loads(user_settings.read_text(encoding="utf-8"))
+            except Exception:
+                sdata = {}
+        if sdata.get("update.mode") != "none":
+            sdata["update.mode"] = "none"
+            user_settings.parent.mkdir(parents=True, exist_ok=True)
+            user_settings.write_text(json.dumps(sdata, indent=2, ensure_ascii=False), encoding="utf-8")
+            if not IS_WINDOWS:
+                try:
+                    os.chmod(user_settings, 0o600)
+                except OSError:
+                    pass
+            modified = True
+    except OSError:
+        pass
+
+    return modified
+
+EPHEMERAL_CACHE_DIRS = [
+    "Code Cache",
+    "GPUCache",
+    "DawnGraphiteCache",
+    "DawnWebGPUCache",
+    "Cache",
+]
+
+def heal_profile_environment(profile_dir: Path, force: bool = False, app_bin: Optional[str] = None) -> dict:
+    """
+    Auto-heal profile environment across AntiGravity updates:
+    - Cleans stale locks if not running.
+    - Purges obsolete bytecode / shader caches on version mismatch or force.
+    - Suppresses auto-updater inside profile.
+    - Updates last_app_version in profile.json.
+    """
+    data_dir = profile_dir / "data"
+    active_pid = get_profile_process(profile_dir, data_dir)
+
+    locks_cleaned = []
+    if active_pid == 0:
+        locks_cleaned = clean_stale_locks(profile_dir, data_dir)
+
+    meta_file = profile_dir / "profile.json"
+    meta = {}
+    if meta_file.is_file():
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+
+    last_ver = meta.get("last_app_version")
+    current_ver = get_installed_app_version(app_bin)
+    version_changed = bool(current_ver and last_ver != current_ver)
+
+    purged_caches = []
+    if (version_changed or force) and active_pid == 0 and data_dir.is_dir():
+        for cache_name in EPHEMERAL_CACHE_DIRS:
+            cdir = data_dir / cache_name
+            if cdir.exists():
+                try:
+                    shutil.rmtree(cdir, ignore_errors=True)
+                    purged_caches.append(cache_name)
+                except OSError:
+                    pass
+
+        if current_ver:
+            meta["last_app_version"] = current_ver
+            try:
+                meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+
+    updater_suppressed = suppress_sandbox_autoupdate(profile_dir)
+
+    return {
+        "active_pid": active_pid,
+        "locks_cleaned": locks_cleaned,
+        "version_changed": version_changed,
+        "old_version": last_ver,
+        "new_version": current_ver,
+        "caches_purged": purged_caches,
+        "updater_suppressed": updater_suppressed,
+    }
 
 # Items symlinked from the real HOME into a profile's fake HOME, by policy.
 # "full" (default) maximizes developer comfort but exposes the real ~/.ssh and
@@ -600,8 +817,15 @@ def create_macos_app_shortcut(profile_name: str, app_display_name: str = None) -
     
     display_name = app_display_name or f"Antigravity ({profile_name})"
     target_app = apps_dir / f"{display_name}.app"
-    script_path = Path(__file__).resolve()
+    script_path = get_canonical_cli_path()
     orig_icns = Path("/Applications/Antigravity.app/Contents/Resources/icon.icns")
+    if not orig_icns.exists():
+        try:
+            cand = Path(get_app_binary()).parent.parent / "Resources" / "icon.icns"
+            if cand.is_file():
+                orig_icns = cand
+        except Exception:
+            pass
 
     # Use the interpreter that is running us right now instead of a bare
     # "python3": applets launched from Spotlight only get the launchd PATH
@@ -925,6 +1149,9 @@ def cmd_launch(args):
     data_dir = profile_dir / "data"
     home_dir = profile_dir / "home"
 
+    # Clean any stale locks first (from crashed or killed sessions)
+    cleaned_locks = clean_stale_locks(profile_dir, data_dir)
+
     pid = get_profile_process(profile_dir, data_dir)
     if pid:
         print(f"{COLOR_YELLOW}Profile '{name}' is already running (PID: {pid}).{COLOR_RESET}")
@@ -935,6 +1162,18 @@ def cmd_launch(args):
         print(f"{COLOR_RED}Error: Antigravity executable not found at:{COLOR_RESET} {app_bin}")
         print("Please specify path using --app or set ANTIGRAVITY_BIN env var.")
         sys.exit(1)
+
+    # Auto-heal environment if host AntiGravity was updated, or if --heal was specified
+    force_heal = getattr(args, "heal", False)
+    heal_report = heal_profile_environment(profile_dir, force=force_heal, app_bin=app_bin)
+    if heal_report.get("version_changed"):
+        print(f"{COLOR_CYAN}  • Detected AntiGravity host update ({heal_report.get('old_version') or 'unknown'} -> {heal_report.get('new_version')}){COLOR_RESET}")
+        print(f"{COLOR_GREEN}    ✓ Auto-healed profile environment and refreshed bytecode cache.{COLOR_RESET}")
+    elif cleaned_locks:
+        print(f"{COLOR_DIM}  • Auto-healed stale lock files: {', '.join(cleaned_locks)}{COLOR_RESET}")
+
+    # Ensure update isolation inside profile sandbox
+    suppress_sandbox_autoupdate(profile_dir)
 
     policy = getattr(args, "links", None) or meta.get("symlink_policy", "full")
     setup_home_symlinks(Path.home(), home_dir, policy)
@@ -1240,6 +1479,184 @@ def cmd_logs(args):
     except KeyboardInterrupt:
         print()
 
+def cmd_doctor(args):
+    """Diagnose and auto-heal profile environments, update compatibility, stale locks, and shortcuts."""
+    profiles_dir = get_profiles_dir()
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    fix_mode = getattr(args, "fix", False)
+    target_name = getattr(args, "name", None)
+
+    app_bin = get_app_binary()
+    current_app_ver = get_installed_app_version(app_bin)
+
+    if target_name:
+        validate_profile_name(target_name.strip())
+        target_dir = profiles_dir / target_name.strip()
+        if not target_dir.is_dir():
+            print(f"{COLOR_RED}Error: Profile '{target_name}' does not exist.{COLOR_RESET}", file=sys.stderr)
+            sys.exit(1)
+        profiles = [target_dir]
+    else:
+        profiles = sorted([p for p in profiles_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
+
+    is_json = getattr(args, "json", False)
+    report_data = {
+        "app_binary": app_bin,
+        "app_version": current_app_ver,
+        "profiles": {},
+        "issues_found": 0,
+        "issues_fixed": 0,
+    }
+
+    if not is_json:
+        print(f"\n{COLOR_BOLD}ParaGravity Health & Compatibility Doctor{COLOR_RESET}")
+        print("=" * 60)
+        bin_status = f"{COLOR_GREEN}✓ Found{COLOR_RESET}" if os.path.exists(app_bin) else f"{COLOR_RED}✗ Not found{COLOR_RESET}"
+        print(f"Host AntiGravity Binary:  {app_bin} ({bin_status})")
+        print(f"Host AntiGravity Version: {COLOR_CYAN}{current_app_ver or 'Unknown'}{COLOR_RESET}")
+        print(f"Profiles Directory:       {profiles_dir}")
+        print("=" * 60)
+
+    if not profiles:
+        if is_json:
+            print(json.dumps(report_data, indent=2))
+        else:
+            print(f"{COLOR_YELLOW}No profiles found.{COLOR_RESET}\n")
+        return
+
+    for pdir in profiles:
+        pname = pdir.name
+        data_dir = pdir / "data"
+        pid = get_profile_process(pdir, data_dir)
+        p_report = {
+            "running": bool(pid),
+            "pid": pid,
+            "stale_locks": [],
+            "cache_version_mismatch": False,
+            "last_app_version": None,
+            "updater_isolated": True,
+            "issues": [],
+            "fixes": [],
+        }
+
+        # 1. Process and stale locks
+        potential_locks = [
+            data_dir / "SingletonLock",
+            data_dir / "SingletonSocket",
+            data_dir / "SingletonCookie",
+            data_dir / "DevToolsActivePort",
+            pdir / "run.pid",
+        ]
+        found_locks = [l.name for l in potential_locks if os.path.lexists(str(l))]
+        if pid:
+            # Active process: locks are legitimate and should not be removed
+            pass
+        elif found_locks:
+            p_report["stale_locks"] = found_locks
+            p_report["issues"].append(f"Stale locks from crashed/killed session: {', '.join(found_locks)}")
+            if fix_mode:
+                cleaned = clean_stale_locks(pdir, data_dir)
+                p_report["fixes"].append(f"Removed stale locks: {', '.join(cleaned)}")
+
+        # 2. Version and bytecode caches
+        meta_file = pdir / "profile.json"
+        meta = {}
+        if meta_file.is_file():
+            try:
+                meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        last_ver = meta.get("last_app_version")
+        p_report["last_app_version"] = last_ver
+        if current_app_ver and last_ver != current_app_ver:
+            p_report["cache_version_mismatch"] = True
+            msg = f"Profile version ({last_ver or 'not recorded'}) differs from host AntiGravity ({current_app_ver})"
+            p_report["issues"].append(msg)
+            if fix_mode:
+                heal_res = heal_profile_environment(pdir, force=True, app_bin=app_bin)
+                purged = heal_res.get("caches_purged", [])
+                fix_desc = f"Upgraded profile version to {current_app_ver}"
+                if purged:
+                    fix_desc += f" & purged outdated caches ({', '.join(purged)})"
+                p_report["fixes"].append(fix_desc)
+
+        # 3. Sandbox auto-updater isolation
+        app_storage = data_dir / "app_storage.json"
+        storage_disabled = False
+        if app_storage.is_file():
+            try:
+                s_json = json.loads(app_storage.read_text(encoding="utf-8"))
+                storage_disabled = (s_json.get("autoCheckForUpdates") == "false")
+            except Exception:
+                pass
+        user_settings = data_dir / "User" / "settings.json"
+        settings_disabled = False
+        if user_settings.is_file():
+            try:
+                u_json = json.loads(user_settings.read_text(encoding="utf-8"))
+                settings_disabled = (u_json.get("update.mode") == "none")
+            except Exception:
+                pass
+
+        if not (storage_disabled and settings_disabled):
+            p_report["updater_isolated"] = False
+            p_report["issues"].append("Sandbox auto-updater is active (risk of quitAndInstall arguments drop)")
+            if fix_mode:
+                suppress_sandbox_autoupdate(pdir)
+                p_report["fixes"].append("Suppressed sandbox auto-updater in app_storage.json and User/settings.json")
+
+        # 4. Shortcut refresh on --fix
+        if fix_mode:
+            if IS_DARWIN:
+                app_shortcut = Path.home() / "Applications" / f"Antigravity ({pname}).app"
+                if app_shortcut.exists():
+                    create_macos_app_shortcut(pname)
+                    p_report["fixes"].append(f"Refreshed macOS shortcut with canonical CLI path: {app_shortcut.name}")
+            elif IS_WINDOWS:
+                create_windows_shortcut(pname)
+
+        # 5. Account info
+        acc_info = extract_account_info(pdir)
+        p_report["account"] = acc_info.get("email")
+        p_report["token_state"] = token_expiry_state(acc_info.get("token_exp"))
+
+        report_data["issues_found"] += len(p_report["issues"])
+        report_data["issues_fixed"] += len(p_report["fixes"])
+        report_data["profiles"][pname] = p_report
+
+        if not is_json:
+            status_str = f"{COLOR_GREEN}RUNNING (PID: {pid}){COLOR_RESET}" if pid else f"{COLOR_DIM}STOPPED{COLOR_RESET}"
+            print(f"\nProfile: {COLOR_BOLD}{pname}{COLOR_RESET} [{status_str}]")
+            if acc_info.get("email"):
+                tok_status = ""
+                if p_report["token_state"] == "expired":
+                    tok_status = f" {COLOR_RED}(Token Expired){COLOR_RESET}"
+                elif p_report["token_state"] == "expiring":
+                    tok_status = f" {COLOR_YELLOW}(Token Expiring Soon){COLOR_RESET}"
+                print(f"  • Account:   {acc_info['email']}{tok_status}")
+            print(f"  • Version:   {last_ver or 'not recorded'} (Host: {current_app_ver or 'unknown'})")
+
+            if p_report["issues"]:
+                for iss in p_report["issues"]:
+                    print(f"  {COLOR_YELLOW}! Issue:     {iss}{COLOR_RESET}")
+            if p_report["fixes"]:
+                for fix in p_report["fixes"]:
+                    print(f"  {COLOR_GREEN}✓ Healed:    {fix}{COLOR_RESET}")
+            if not p_report["issues"] and not p_report["fixes"]:
+                print(f"  {COLOR_GREEN}✓ Health:    100% compatible & isolated (no issues){COLOR_RESET}")
+
+    if is_json:
+        print(json.dumps(report_data, indent=2))
+    else:
+        print("\n" + "=" * 60)
+        if fix_mode:
+            print(f"{COLOR_GREEN}Doctor repair complete: {report_data['issues_fixed']} issue(s) healed.{COLOR_RESET}\n")
+        elif report_data["issues_found"] > 0:
+            print(f"{COLOR_YELLOW}Doctor found {report_data['issues_found']} issue(s).{COLOR_RESET}")
+            print(f"Run {COLOR_CYAN}pgrav doctor --fix{COLOR_RESET} to automatically heal all profiles.\n")
+        else:
+            print(f"{COLOR_GREEN}All profiles are completely healthy and ready for parallel execution!{COLOR_RESET}\n")
+
 def cmd_web(args):
     """Start the modern Web Console."""
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1515,7 +1932,16 @@ def main():
     p_launch.add_argument("--app", help="Path to Antigravity binary")
     p_launch.add_argument("--links", choices=("full", "minimal", "none"), default=None,
                           help="Override the profile's stored symlink policy for this launch")
+    p_launch.add_argument("--heal", action="store_true",
+                          help="Force auto-heal and refresh bytecode caches before launch")
     p_launch.set_defaults(func=cmd_launch)
+
+    # doctor / health
+    p_doctor = subparsers.add_parser("doctor", aliases=["heal"], help="Check system health, AntiGravity version compatibility, and fix stale locks/caches")
+    p_doctor.add_argument("name", nargs="?", default=None, help="Optional profile name to diagnose")
+    p_doctor.add_argument("--fix", action="store_true", help="Automatically repair detected issues (stale locks, outdated caches, updater isolation)")
+    p_doctor.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     # stop
     p_stop = subparsers.add_parser("stop", help="Stop running instance of profile")
