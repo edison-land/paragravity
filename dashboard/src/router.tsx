@@ -32,7 +32,7 @@ import {
 import { AntigravityIcon } from "./components/AntigravityIcon"
 import { CreateProfileDialog } from "./components/CreateProfileDialog"
 import { DeleteConfirmDialog } from "./components/DeleteConfirmDialog"
-import type { Profile } from "./types"
+import { mapApiProfile, type ApiProfile, type Profile } from "./types"
 
 // Default 4 mock profiles showcasing multi-instance parallelism (2, 3, 4 parallel)
 const INITIAL_DEMO_PROFILES: Profile[] = [
@@ -181,8 +181,8 @@ function IslandDashboard() {
     try {
       const res = await fetch("/api/profiles")
       if (res.ok) {
-        const data = await res.json()
-        setRealProfiles(data)
+        const data: ApiProfile[] = await res.json()
+        setRealProfiles(data.map(mapApiProfile))
         if (data.length === 0 && !isDemoMode) {
           setIsDemoMode(true)
         }
@@ -671,7 +671,7 @@ function IslandDashboard() {
                             {/* Metric Tag */}
                             <div>
                               <span className={`font-mono text-xs font-bold ${theme.metricColor} flex items-center gap-1`}>
-                                <span>{profile.size || "18.2 MB"}</span>
+                                <span>{profile.size || "—"}</span>
                               </span>
                             </div>
 
@@ -743,7 +743,7 @@ function IslandDashboard() {
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-xs font-mono text-slate-700 font-medium">
                     <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    <span>0 MB 内存闲置</span>
+                    <span>{runningCount} / {profilesToDisplay.length} 运行中</span>
                   </div>
 
                   <span className="text-xs text-slate-400 font-medium">

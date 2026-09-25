@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import time
 import mimetypes
 import webbrowser
 import subprocess
@@ -26,6 +27,21 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DASHBOARD_DIST = REPO_ROOT / "dashboard" / "dist"
 CLI_PATH = REPO_ROOT / "bin" / "paragravity"
+
+# mimetypes reads the Windows registry and may report .js as text/plain, which
+# makes browsers refuse to execute module scripts — pin the web essentials.
+MIME_OVERRIDES = {
+    ".js": "text/javascript", ".mjs": "text/javascript",
+    ".css": "text/css", ".json": "application/json",
+    ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml",
+    ".woff": "font/woff", ".woff2": "font/woff2",
+    ".png": "image/png", ".jpg": "image/jpeg", ".ico": "image/x-icon",
+}
+
+# Tiny TTL cache so a polling dashboard doesn't spawn a CLI subprocess on
+# every request when several widgets/tabs are open at once.
+_profiles_cache = {"t": 0.0, "body": b"[]"}
+PROFILES_CACHE_TTL = 1.0
 
 WIDGET_HTML = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -167,6 +183,9 @@ WIDGET_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
+        const esc = s => String(s ?? '').replace(/[&<>"']/g,
+            c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
         async function fetchProfiles() {
             try {
                 const res = await fetch('/api/profiles');
@@ -192,10 +211,10 @@ WIDGET_HTML = """<!DOCTYPE html>
                     <div class="profile-info">
                         <div class="profile-name">
                             <span class="status-dot ${p.running ? 'running' : 'stopped'}"></span>
-                            <span>${p.name}</span>
-                            ${p.running ? `<span style="font-size:10px;color:#94A3B8;">(PID: ${p.pid})</span>` : ''}
+                            <span>${esc(p.name)}</span>
+                            ${p.running ? `<span style="font-size:10px;color:#94A3B8;">(PID: ${esc(p.pid)})</span>` : ''}
                         </div>
-                        <div class="profile-account">${p.account || '(未绑定 Google 账号)'}</div>
+                        <div class="profile-account">${esc(p.account || '(未绑定 Google 账号)')}</div>
                     </div>
                     <div>
                         ${p.running
@@ -358,6 +377,9 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
+        const esc = s => String(s ?? '').replace(/[&<>"']/g,
+            c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
         async function fetchProfiles() {
             try {
                 const res = await fetch('/api/profiles');
@@ -378,13 +400,13 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
                 <div class="card">
                     <div>
                         <div class="card-header">
-                            <span class="card-title">${p.name}</span>
+                            <span class="card-title">${esc(p.name)}</span>
                             <span class="status-badge ${p.running ? 'status-running' : 'status-stopped'}">
-                                ${p.running ? `● 运行中 (${p.pid})` : '○ 已停止'}
+                                ${p.running ? `● 运行中 (${esc(p.pid)})` : '○ 已停止'}
                             </span>
                         </div>
-                        <div class="card-account" style="margin-top:8px;">${p.account || '(未绑定 Google 账号)'}</div>
-                        <div class="card-account" style="margin-top:4px;font-size:11px;">目录: ${p.directory || '-'}</div>
+                        <div class="card-account" style="margin-top:8px;">${esc(p.account || '(未绑定 Google 账号)')}</div>
+                        <div class="card-account" style="margin-top:4px;font-size:11px;">目录: ${esc(p.directory || '-')}</div>
                     </div>
                     <div class="card-actions">
                         ${p.running
@@ -462,6 +484,10 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self):
+        if self.path.startswith("/api/") and not self.check_origin():
+            self.send_error(403, "Forbidden: Cross-origin request rejected")
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -541,13 +567,33 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
 
         self.send_error(404, "Endpoint not found")
 
-    def handle_get_profiles(self):
+    def _profiles_json_bytes(self) -> bytes:
+        """Run `list --json` and return a guaranteed-JSON payload.
+
+        Served from a short TTL cache; a non-JSON CLI output can never leak
+        into an application/json response body.
+        """
+        now = time.time()
+        if now - _profiles_cache["t"] < PROFILES_CACHE_TTL:
+            return _profiles_cache["body"]
         try:
             out = subprocess.check_output([sys.executable, str(CLI_PATH), "list", "--json"], text=True)
+            payload = out.strip() or "[]"
+            json.loads(payload)  # validate before caching/serving
+        except Exception:
+            payload = "[]"
+        _profiles_cache["t"] = now
+        _profiles_cache["body"] = payload.encode("utf-8")
+        return _profiles_cache["body"]
+
+    def handle_get_profiles(self):
+        try:
+            body = self._profiles_json_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(out.strip().encode("utf-8"))
+            self.wfile.write(body)
         except Exception as e:
             self.send_json({"error": str(e)}, status=500)
 
@@ -615,8 +661,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
             data = json.loads(body or "{}")
             names = data.get("names", [])
             if not names:
-                out = subprocess.check_output([sys.executable, str(CLI_PATH), "list", "--json"], text=True)
-                profiles = json.loads(out or "[]")
+                profiles = json.loads(self._profiles_json_bytes())
                 names = [p["name"] for p in profiles if not p.get("running")]
 
             results = []
@@ -638,8 +683,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
             data = json.loads(body or "{}")
             names = data.get("names", [])
             if not names:
-                out = subprocess.check_output([sys.executable, str(CLI_PATH), "list", "--json"], text=True)
-                profiles = json.loads(out or "[]")
+                profiles = json.loads(self._profiles_json_bytes())
                 names = [p["name"] for p in profiles if p.get("running")]
 
             results = []
@@ -731,18 +775,30 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(STANDALONE_CONSOLE_HTML.encode("utf-8"))
+            if self.command != "HEAD":
+                self.wfile.write(STANDALONE_CONSOLE_HTML.encode("utf-8"))
             return
 
-        rel_path = path.lstrip("/")
-        target = DASHBOARD_DIST / rel_path
+        rel_path = unquote(path).lstrip("/")
+        dist_root = DASHBOARD_DIST.resolve()
+        target = (dist_root / rel_path).resolve()
+
+        # Path traversal guard: the resolved target must stay inside dist/.
+        # `/../../secret` or %2e%2e sequences must never escape the docroot.
+        try:
+            target.relative_to(dist_root)
+        except ValueError:
+            self.send_error(403, "Forbidden")
+            return
 
         # SPA fallback to index.html if file doesn't exist
         if not target.is_file():
             target = index_file
 
-        content_type, _ = mimetypes.guess_type(str(target))
-        content_type = content_type or "application/octet-stream"
+        content_type = MIME_OVERRIDES.get(target.suffix.lower())
+        if not content_type:
+            guessed, _ = mimetypes.guess_type(str(target))
+            content_type = guessed or "application/octet-stream"
 
         try:
             data = target.read_bytes()
@@ -750,7 +806,8 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD":
+                self.wfile.write(data)
         except Exception as e:
             self.send_error(500, f"Error reading file: {e}")
 
@@ -768,7 +825,11 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
 
 def start_server(port: int = 3888, open_browser: bool = True, widget_mode: bool = False):
     server_address = ("127.0.0.1", port)
-    httpd = ThreadingHTTPServer(server_address, ParaGravityHandler)
+    try:
+        httpd = ThreadingHTTPServer(server_address, ParaGravityHandler)
+    except OSError:
+        print(f"\033[31mError: port {port} is already in use. Pick another with: pgrav web --port <port>\033[0m", file=sys.stderr)
+        sys.exit(1)
     base_url = f"http://127.0.0.1:{port}"
     target_url = f"{base_url}/widget" if widget_mode else base_url
 

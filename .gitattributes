@@ -3,3 +3,5 @@
 # trailing \r, which corrupts values and breaks Git Bash execution.
 *.sh text eol=lf
 bin/pgrav text eol=lf
+bin/paragravity text eol=lf
+bin/web_server.py text eol=lf

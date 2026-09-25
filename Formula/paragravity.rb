@@ -11,6 +11,10 @@ class Paragravity < Formula
     bin.install "bin/paragravity"
     bin.install_symlink "paragravity" => "pgrav"
 
+    # `pgrav web` imports web_server.py from the paragravity script's own
+    # directory — it must ship alongside the CLI binary.
+    bin.install "bin/web_server.py" if File.exist?("bin/web_server.py")
+
     # Install zsh completions if present
     if File.exist?("completions/_paragravity")
       zsh_completion.install "completions/_paragravity"

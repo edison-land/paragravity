@@ -120,13 +120,13 @@ class AutoHealingUnitTests(unittest.TestCase):
             lock = data_dir / "SingletonLock"
             lock.write_text("running-instance-lock")
             pid_file = pdir / "run.pid"
-            # Set to current Python test runner process PID
             pid_file.write_text(str(os.getpid()))
 
-            cleaned = self.cli.clean_stale_locks(pdir, data_dir)
-            self.assertEqual(cleaned, [])
-            self.assertTrue(lock.exists())
-            self.assertTrue(pid_file.exists())
+            with patch.object(self.cli, "get_profile_process", return_value=os.getpid()):
+                cleaned = self.cli.clean_stale_locks(pdir, data_dir)
+                self.assertEqual(cleaned, [])
+                self.assertTrue(lock.exists())
+                self.assertTrue(pid_file.exists())
 
     def test_suppress_sandbox_autoupdate_isolates_updater_without_data_loss(self):
         with tempfile.TemporaryDirectory() as tmp:
