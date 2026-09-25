@@ -1,0 +1,1467 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParaGravity — Unlimited Parallel Multi-Account & Sandbox Architecture for Google Antigravity</title>
+  <meta name="description" content="Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity. Run unlimited Gemini Pro accounts side-by-side on macOS and Windows with 0 MB idle RAM.">
+  <meta name="keywords" content="Google Antigravity, Antigravity, multi-account, multiple accounts, sandbox, parallel instances, Gemini 2.5 Pro, AI coding, pgrav, macOS Spotlight, Windows sandbox, rate limit, quota bypass, profile manager, developer tools">
+  <meta name="author" content="Edison (@Edison_aware)">
+  <link rel="canonical" href="https://edison-land.github.io/paragravity/">
+  <meta name="theme-color" content="#000000">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://edison-land.github.io/paragravity/">
+  <meta property="og:site_name" content="ParaGravity">
+  <meta property="og:title" content="ParaGravity — Unlimited Multi-Account Sandboxes for Google Antigravity">
+  <meta property="og:description" content="Run unlimited isolated Google Gemini accounts side-by-side on macOS & Windows. Agent-ready setup guide. 100% non-invasive, 0 MB idle RAM.">
+  <meta property="og:image" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta property="og:image:secure_url" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="ParaGravity — Unlimited Parallel Multi-Account & Sandbox Architecture for Google Antigravity">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="zh_CN">
+
+  <!-- Twitter Cards -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@Edison_aware">
+  <meta name="twitter:creator" content="@Edison_aware">
+  <meta name="twitter:title" content="ParaGravity — Unlimited Multi-Instance Antigravity">
+  <meta name="twitter:description" content="Break free from Gemini rate limits. Native macOS Spotlight integration, 0 MB idle RAM, Agent-ready prompt.">
+  <meta name="twitter:image" content="https://edison-land.github.io/paragravity/assets/og-image.png">
+  <meta name="twitter:image:alt" content="ParaGravity — Multi-Account Sandboxes for Google Antigravity">
+
+  <!-- JSON-LD Structured Data: SoftwareApplication & FAQPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "ParaGravity",
+        "alternateName": "pgrav",
+        "url": "https://edison-land.github.io/paragravity/",
+        "image": "https://edison-land.github.io/paragravity/assets/og-image.png",
+        "description": "Native, non-invasive parallel multi-account & sandbox manager for Google Antigravity on macOS and Windows.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "author": {
+          "@type": "Person",
+          "name": "Edison",
+          "url": "https://x.com/Edison_aware"
+        },
+        "license": "https://opensource.org/licenses/MIT",
+        "codeRepository": "https://github.com/edison-land/paragravity"
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does this violate Google ToS or risk banning my accounts?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. ParaGravity utilizes standard Chromium command-line options (--user-data-dir), the officially supported sandbox partitioning flag. No binary executables are decompiled or patched, and the native Google Cloud OAuth flow remains untouched."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Are my Google OAuth tokens and credentials secure?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. All sandboxes reside locally on your disk under ~/.antigravity-profiles/ with owner-only (0700/0600) permissions. ParaGravity contains zero telemetry and makes zero outbound network requests."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I inherit my keybindings and MCP servers?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Pass -i (or --inherit-config) when provisioning a profile. It automatically clones editor settings and links MCP configurations without leaking credentials or conversation histories."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is Windows supported?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. ParaGravity provides cross-platform parity on macOS and Windows (PowerShell, CMD, and Git Bash MSYS2). It generates native Windows Start Menu shortcuts for Win + S indexing."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            apple: {
+              black: '#000000',
+              gray900: '#08080a',
+              gray850: '#111114',
+              gray800: '#1a1a1e',
+              gray700: '#2c2c2e',
+              gray500: '#6e6e73',
+              gray400: '#86868b',
+              gray200: '#d2d2d7',
+              gray100: '#f5f5f7',
+              blue: '#2997ff',
+              blueHover: '#0077ed',
+            }
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', '"Helvetica Neue"', 'sans-serif'],
+            mono: ['"SF Mono"', '"JetBrains Mono"', 'Menlo', 'monospace']
+          },
+          letterSpacing: {
+            'apple-tight': '-0.035em',
+            'apple-snug': '-0.02em',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    ::selection {
+      background: rgba(41, 151, 255, 0.35);
+      color: #ffffff;
+    }
+
+    body {
+      background-color: #000000;
+      color: #f5f5f7;
+      overflow-x: hidden;
+    }
+
+    /* Apple Titanium Gradient Text */
+    .text-titanium {
+      background: linear-gradient(180deg, #ffffff 20%, #9e9ea3 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      padding-bottom: 0.16em;
+      margin-bottom: -0.16em;
+      display: inline-block;
+    }
+
+    .text-titanium-muted {
+      background: linear-gradient(180deg, #d2d2d7 20%, #6e6e73 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      padding-bottom: 0.16em;
+      margin-bottom: -0.16em;
+      display: inline-block;
+    }
+
+    /* Apple Pro Glass Card */
+    .apple-card {
+      background: rgba(17, 17, 20, 0.76);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+    }
+
+    .apple-card:hover {
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    /* Hardware Highlight Line */
+    .specular-highlight {
+      position: relative;
+    }
+    .specular-highlight::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 10%;
+      right: 10%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.25), transparent);
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    /* Scroll presentation components */
+    [data-scroll-slide] {
+      will-change: transform, opacity;
+      transform-origin: center center;
+    }
+
+    .headline-wrap {
+      word-break: keep-all;
+      overflow-wrap: normal;
+    }
+
+    /* Dynamic Active Header Pill in Navbar */
+    .nav-item {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .nav-item.active {
+      color: #ffffff !important;
+      background: rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 0 14px rgba(41, 151, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+
+    /* ========================================== */
+    /* Language Morph Transition Engine          */
+    /* Smooth Apple Keynote Dissolve & Float      */
+    /* ========================================== */
+    .lang-fade-out {
+      opacity: 0 !important;
+      transform: translateY(-8px) scale(0.99) !important;
+      filter: blur(4px) !important;
+      transition: opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                  transform 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+                  filter 0.16s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    }
+
+    .lang-fade-in-prep {
+      opacity: 0 !important;
+      transform: translateY(8px) scale(0.99) !important;
+      filter: blur(4px) !important;
+      transition: none !important;
+    }
+
+    .lang-fade-in-active {
+      opacity: 1 !important;
+      transform: translateY(0) scale(1) !important;
+      filter: blur(0px) !important;
+      transition: opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+                  filter 0.32s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    }
+
+    #lang-toggle {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #lang-toggle:active {
+      transform: scale(0.92);
+    }
+  </style>
+</head>
+<body class="bg-black text-[#f5f5f7] antialiased min-h-screen flex flex-col font-sans">
+
+  <!-- Apple Prominent Navigation Bar (Expanded & Clean) -->
+  <header class="sticky top-0 z-50 w-full border-b border-white/[0.08] bg-black/85 backdrop-blur-2xl">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between">
+      <!-- Logo & Brand -->
+      <a href="#" class="flex items-center space-x-3 text-[#f5f5f7] hover:text-white transition-opacity group">
+        <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-white/[0.08] border border-white/[0.12] flex items-center justify-center group-hover:bg-white/[0.12] transition-colors">
+          <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="flex items-center space-x-2">
+          <span class="font-bold text-base sm:text-xl tracking-tight text-white">ParaGravity</span>
+          <span class="text-xs font-mono text-[#86868b] px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08]">pgrav</span>
+        </div>
+      </a>
+
+      <!-- Center Links (Apple SF Pro Font) with Dynamic Active Indicator -->
+      <nav id="nav-menu" class="hidden md:flex items-center space-x-1 sm:space-x-1.5 text-xs sm:text-sm font-medium p-1 rounded-full bg-white/[0.04] border border-white/[0.08] backdrop-blur-xl">
+        <a href="#overview" data-nav="overview" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_overview">Overview</a>
+        <a href="#architecture" data-nav="architecture" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_architecture">Architecture</a>
+        <a href="#agent-setup" data-nav="agent-setup" class="nav-item px-3.5 py-1.5 rounded-full text-[#2997ff] hover:text-white flex items-center space-x-1">
+          <span data-i18n="nav_agent">Agent Prompt</span>
+        </a>
+        <a href="#specs" data-nav="specs" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_specs">Specifications</a>
+        <a href="#cheatsheet" data-nav="cheatsheet" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_commands">Commands</a>
+        <a href="#faq" data-nav="faq" class="nav-item px-3.5 py-1.5 rounded-full text-[#86868b] hover:text-white" data-i18n="nav_faq">FAQ</a>
+      </nav>
+
+      <!-- Right Action Items (Icon Only for GitHub as requested) -->
+      <div class="flex items-center space-x-3">
+        <!-- Language Switcher -->
+        <button id="lang-toggle" class="px-3 py-1.5 rounded-lg text-xs sm:text-sm font-mono text-[#86868b] hover:text-[#f5f5f7] hover:bg-white/[0.08] transition-all border border-white/[0.1] flex items-center space-x-1.5">
+          <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+          <span id="lang-label">中文</span>
+        </button>
+
+        <!-- X (Twitter) Link -->
+        <a href="https://x.com/Edison_aware" target="_blank" rel="noopener noreferrer" 
+           class="p-2 sm:p-2.5 rounded-lg text-[#86868b] hover:text-white hover:bg-white/[0.08] transition-all border border-white/[0.08]"
+           title="Follow Edison on X (@Edison_aware)">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+        </a>
+
+        <!-- GitHub Icon-Only Pill (No text, as requested) -->
+        <a href="https://github.com/edison-land/paragravity" target="_blank" rel="noopener noreferrer" 
+           class="p-2 sm:p-2.5 rounded-lg text-[#86868b] hover:text-white hover:bg-white/[0.08] transition-all border border-white/[0.08]"
+           title="View on GitHub">
+          <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main class="flex-1 relative z-10">
+    <section class="pt-20 pb-20 sm:pt-28 sm:pb-32 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto text-center">
+      <!-- Apple Eyebrow Badge -->
+      <div class="inline-flex items-center space-x-2.5 px-4 py-1.5 rounded-full bg-white/[0.05] border border-white/[0.1] text-xs sm:text-sm font-mono text-[#86868b] mb-8">
+        <span class="w-2 h-2 rounded-full bg-[#2997ff]"></span>
+        <span data-i18n="hero_eyebrow_1">macOS & Windows</span>
+        <span class="text-[#424245]">|</span>
+        <span class="text-[#d2d2d7]" data-i18n="hero_eyebrow_2">Multi-Account Concurrency</span>
+      </div>
+
+      <!-- Main Headline (Strictly 2 Lines with Clean Line Height and No Descender Clipping) -->
+      <h1 id="hero-headline" class="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold tracking-apple-tight text-[#f5f5f7] mb-8 sm:mb-10 leading-[1.35] sm:leading-[1.4] headline-wrap">
+        <span id="hero-title-1" class="text-titanium inline-block pb-1.5 sm:pb-2.5 mb-1 sm:mb-2" data-i18n="hero_title_1">Run Multiple Antigravity Accounts.</span><br>
+        <span id="hero-title-2" class="text-titanium-muted inline-block pb-2 sm:pb-3" data-i18n="hero_title_2">Independent Sandboxes. Zero Quota Stalls.</span>
+      </h1>
+
+      <!-- Subtitle -->
+      <p id="hero-desc" class="max-w-3xl mx-auto text-base sm:text-xl text-[#86868b] mt-4 sm:mt-6 mb-12 leading-relaxed font-normal" data-i18n="hero_desc">
+        Run multiple Google accounts side-by-side in strictly isolated sandboxes without relogging. Dual quota pools prevent workflow stalls, instant Spotlight access, 0 MB background RAM.
+      </p>
+
+      <!-- Dual Purpose Quick Box: Human CLI vs Agent Prompt -->
+      <div class="max-w-3xl mx-auto mb-12">
+        <div class="rounded-2xl border border-white/[0.12] bg-[#111114] shadow-2xl overflow-hidden specular-highlight">
+          <!-- Mode Tabs (No robot emoji, clean and elegant) -->
+          <div class="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-white/[0.08] bg-[#0c0c0e]">
+            <div class="flex items-center space-x-2">
+              <span class="w-3 h-3 rounded-full bg-[#ff5f56]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#ffbd2e]"></span>
+              <span class="w-3 h-3 rounded-full bg-[#27c93f]"></span>
+              <span id="terminal-mode-label" class="text-xs font-mono text-[#86868b] ml-3" data-i18n="box_label_human">Interactive Setup</span>
+            </div>
+            <!-- Switcher Tabs -->
+            <div class="flex items-center space-x-1.5 text-xs font-mono">
+              <button id="tab-mac" onclick="switchMode('mac')" class="px-3 py-1 rounded-md text-white bg-white/[0.12] font-medium transition-all">macOS</button>
+              <button id="tab-win" onclick="switchMode('win')" class="px-3 py-1 rounded-md text-[#86868b] hover:text-white transition-all">Windows</button>
+              <button id="tab-agent" onclick="switchMode('agent')" class="px-3 py-1 rounded-md text-[#2997ff] bg-[#2997ff]/10 border border-[#2997ff]/30 font-medium transition-all">
+                <span data-i18n="tab_agent_btn">Copy for Agent</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Code / Prompt Content -->
+          <div class="p-4 sm:p-5 flex items-center justify-between font-mono text-xs sm:text-sm text-left bg-black/70">
+            <div class="flex items-center space-x-3 overflow-x-auto py-1 scrollbar-none pr-3">
+              <span id="prompt-prefix" class="text-[#86868b] select-none">$</span>
+              <code id="install-cmd" class="text-[#f5f5f7] whitespace-pre-wrap break-all sm:whitespace-nowrap">curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash</code>
+            </div>
+            <button onclick="copyCommand()" class="shrink-0 flex items-center space-x-2 px-4 py-2 rounded-xl bg-white/[0.12] hover:bg-white/[0.2] text-[#f5f5f7] text-xs sm:text-sm font-mono border border-white/[0.1] transition-all active:scale-95 shadow-sm">
+              <i id="copy-icon" data-lucide="copy" class="w-4 h-4 text-[#86868b]"></i>
+              <span id="copy-text" data-i18n="btn_copy">Copy</span>
+            </button>
+          </div>
+
+          <!-- Helper subtext -->
+          <div id="box-helper-text" class="px-4 py-2.5 bg-white/[0.02] border-t border-white/[0.04] text-[11px] font-mono text-[#86868b] text-left" data-i18n="box_hint_human">
+            Run in your terminal. Automatically sets up isolated sandboxes and native macOS launchers.
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons (With GitHub Logo in White Pill) -->
+      <div class="flex flex-wrap items-center justify-center gap-4">
+        <a href="https://github.com/edison-land/paragravity" target="_blank" rel="noopener noreferrer"
+           class="inline-flex items-center space-x-2.5 px-7 py-3 rounded-full bg-[#f5f5f7] hover:bg-white text-black font-semibold text-sm transition-all hover:scale-[1.02] active:scale-[0.98]">
+          <svg class="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+          </svg>
+          <span data-i18n="btn_github">View Source on GitHub</span>
+        </a>
+        <a href="https://x.com/Edison_aware" target="_blank" rel="noopener noreferrer"
+           class="inline-flex items-center space-x-2.5 px-7 py-3 rounded-full border border-white/[0.15] hover:border-white/[0.25] bg-white/[0.04] hover:bg-white/[0.08] text-[#f5f5f7] font-semibold text-sm transition-all hover:scale-[1.02] active:scale-[0.98]">
+          <svg class="w-4 h-4 fill-current text-[#2997ff] shrink-0" viewBox="0 0 24 24">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+          </svg>
+          <span data-i18n="btn_follow">Follow @Edison_aware</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- SECTION 1: Multi-Instance Showcase (+40% Exaggerated Slide-in) -->
+    <section id="overview" class="py-16 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+      <!-- Section Tag -->
+      <div class="text-center mb-10" data-scroll-slide="section-header">
+        <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="showcase_eyebrow">CONCURRENT MULTI-ACCOUNT WORKFLOW</span>
+        <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="showcase_title">Independent Sandboxes. Zero Quota Interruption.</h2>
+        <p class="text-sm text-[#86868b] mt-2" data-i18n="showcase_sub">Keep multiple Google accounts open simultaneously with completely separate rate limits.</p>
+      </div>
+
+      <!-- Active Profile Pill Bar -->
+      <div class="mb-5 apple-card rounded-2xl p-4 sm:px-6 sm:py-3.5 flex flex-wrap items-center justify-between text-xs font-mono" data-scroll-slide="banner-pill">
+        <div class="flex items-center space-x-3 text-[#d2d2d7]">
+          <span class="px-2 py-0.5 rounded bg-white/[0.1] text-white font-semibold">Cmd + Space</span>
+          <span data-i18n="spotlight_banner">Spotlight: Type "Antigravity (work)" or "Antigravity (personal)" &bull; Instant 0.2s launch</span>
+        </div>
+        <div class="text-[#86868b] mt-2 sm:mt-0 flex items-center space-x-2">
+          <span class="w-2 h-2 rounded-full bg-[#2997ff] animate-pulse"></span>
+          <span data-i18n="active_instances_badge">Active Sandboxes: work, personal (Concurrent)</span>
+        </div>
+      </div>
+
+      <!-- Split Windows: Left slides from left, Right slides from right (Exaggerated +40%) -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Work Profile Window (Slide from Left) -->
+        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="split-left">
+          <div>
+            <!-- Window Topbar -->
+            <div class="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-4">
+              <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-[#2997ff]"></span>
+                <span class="text-xs font-semibold text-white">Antigravity (work)</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.08] text-[#86868b]" data-i18n="win1_tag">Enterprise Workspace</span>
+              </div>
+              <span class="text-[11px] font-mono text-[#86868b]">dev.corp@company.com</span>
+            </div>
+
+            <!-- Terminal Output -->
+            <div class="space-y-3 font-mono text-xs">
+              <div class="text-white font-medium flex items-center space-x-2">
+                <i data-lucide="terminal" class="w-4 h-4 text-[#2997ff]"></i>
+                <span data-i18n="win1_task">Task: Core Services & Internal Repositories</span>
+              </div>
+              <div class="p-3 rounded-lg bg-black/60 border border-white/[0.06] space-y-1.5 text-[11px] text-[#86868b]">
+                <div class="text-[#f5f5f7]" data-i18n="win1_b1">&bull; Isolated chat context & storage, strictly preventing commercial leakage</div>
+                <div data-i18n="win1_b2">&bull; Enterprise Workspace dedicated quota pool, zero personal crossover</div>
+                <div class="text-[#2997ff]" data-i18n="win1_b3">&bull; Status: Executing migration scripts & tests...</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6 pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono text-[#6e6e73]">
+            <span>Sandbox: ~/.antigravity-profiles/work</span>
+            <span class="text-[#2997ff]">PID: 49377</span>
+          </div>
+        </div>
+
+        <!-- Personal Profile Window (Slide from Right) -->
+        <div class="apple-card rounded-2xl p-5 sm:p-6 specular-highlight flex flex-col justify-between" data-scroll-slide="split-right">
+          <div>
+            <!-- Window Topbar -->
+            <div class="flex items-center justify-between border-b border-white/[0.06] pb-3 mb-4">
+              <div class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-white"></span>
+                <span class="text-xs font-semibold text-white">Antigravity (personal)</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.08] text-[#86868b]" data-i18n="win2_tag">Personal Pro</span>
+              </div>
+              <span class="text-[11px] font-mono text-[#86868b]">edison.dev@gmail.com</span>
+            </div>
+
+            <!-- Terminal Output -->
+            <div class="space-y-3 font-mono text-xs">
+              <div class="text-white font-medium flex items-center space-x-2">
+                <i data-lucide="sparkles" class="w-4 h-4 text-[#d2d2d7]"></i>
+                <span data-i18n="win2_task">Task: Open Source & Side Projects</span>
+              </div>
+              <div class="p-3 rounded-lg bg-black/60 border border-white/[0.06] space-y-1.5 text-[11px] text-[#86868b]">
+                <div class="text-[#f5f5f7]" data-i18n="win2_b1">&bull; Cloned keybindings, themes & MCP servers (-i)</div>
+                <div data-i18n="win2_b2">&bull; Independent personal quota, completely unharmed by work limit hit</div>
+                <div class="text-[#d2d2d7]" data-i18n="win2_b3">&bull; Status: Generating UI modules in separate window</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-6 pt-3 border-t border-white/[0.06] flex items-center justify-between text-[11px] font-mono text-[#6e6e73]">
+            <span>Sandbox: ~/.antigravity-profiles/personal</span>
+            <span class="text-[#d2d2d7]">PID: 51204</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: Architecture / Pain vs Solution (Exaggerated Recede vs Elevate) -->
+    <section id="architecture" class="py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
+        <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="arch_eyebrow">THE ARCHITECTURAL DIFFERENCE</span>
+        <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="arch_title">Engineered to Solve Native Limitations</h2>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch">
+        <!-- Card Left: Vanilla Pain (Symmetrical Level Alignment) -->
+        <div class="apple-card rounded-2xl p-6 sm:p-8 opacity-85 h-full flex flex-col justify-between" data-scroll-slide="arch-left">
+          <div>
+            <div class="flex items-center space-x-2 text-[#86868b] mb-6">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#6e6e73]"></span>
+              <h3 class="text-sm font-mono uppercase tracking-wider text-[#86868b]" data-i18n="pain_header">Standard Single-Account Setup</h3>
+            </div>
+            <ul class="space-y-4 text-xs sm:text-sm text-[#86868b]">
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b1"><strong>Single Quota Ceiling:</strong> Frequent 429 quota exhaustion. Tasks halt while rate limits cooldown.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b2"><strong>Disruptive Account Switching:</strong> Switching accounts forces full sign-out, aborting running agent trajectories.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b3"><strong>Context & Repository Pollution:</strong> Enterprise Workspace code and personal repositories commingle in one environment.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#6e6e73] font-mono">&times;</span>
+                <span data-i18n="pain_b4"><strong>Blank Slate Friction:</strong> Manually passing data dirs loses custom keybindings, MCP servers, and agent skills.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Card Right: ParaGravity Solution (Symmetrical Level Alignment) -->
+        <div class="apple-card rounded-2xl p-6 sm:p-8 border-white/[0.2] shadow-2xl h-full flex flex-col justify-between" data-scroll-slide="arch-right">
+          <div>
+            <div class="flex items-center space-x-2 text-[#f5f5f7] mb-6">
+              <span class="w-2.5 h-2.5 rounded-full bg-[#2997ff]"></span>
+              <h3 class="text-sm font-mono uppercase tracking-wider text-white" data-i18n="sol_header">ParaGravity Architecture</h3>
+            </div>
+            <ul class="space-y-4 text-xs sm:text-sm text-[#d2d2d7]">
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b1"><strong>Multi-Quota Bandwidth:</strong> Each instance connects to its own Google account with an independent quota pool.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b2"><strong>Native Side-by-Side Windows:</strong> Keep corporate and personal accounts running in split screens simultaneously.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b3"><strong>Hardware-Grade Sandbox:</strong> Official Chromium <code>--user-data-dir</code> and POSIX <code>0700</code> permission isolation.</span>
+              </li>
+              <li class="flex items-start space-x-3">
+                <span class="text-[#2997ff] font-mono">&bull;</span>
+                <span data-i18n="sol_b4"><strong>Zero-Friction Inheritance:</strong> Pass <code>-i</code> to clone settings and link MCP tools while isolating credentials.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: Agent Automation Section (Relative Link to agent.md) -->
+    <section id="agent-setup" class="py-20 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
+      <div class="apple-card rounded-3xl p-8 sm:p-12 specular-highlight border-white/[0.15]" data-scroll-slide="agent-card">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-white/[0.08]">
+          <div>
+            <div class="inline-flex items-center space-x-2 text-xs font-mono text-[#2997ff] mb-2">
+              <span class="w-2 h-2 rounded-full bg-[#2997ff]"></span>
+              <span data-i18n="agent_badge">MACHINE READABLE SPECIFICATION</span>
+            </div>
+            <h3 class="text-2xl sm:text-3xl font-semibold text-white tracking-apple-tight" data-i18n="agent_title">
+              Hand It Off to Your AI Agent
+            </h3>
+            <p class="text-sm text-[#86868b] mt-2 max-w-xl" data-i18n="agent_desc">
+              Don't want to run manual setup commands? Simply paste this directive into your AI Agent.
+            </p>
+          </div>
+          <div class="shrink-0 flex items-center space-x-3">
+            <!-- Relative Link to agent.md (Works immediately on local and remote) -->
+            <a href="agent.md" target="_blank" class="px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-xs font-mono text-[#d2d2d7] border border-white/[0.1] transition-all flex items-center space-x-1.5" title="View agent.md specification">
+              <i data-lucide="file-text" class="w-3.5 h-3.5 text-[#2997ff]"></i>
+              <span>agent.md</span>
+            </a>
+            <button onclick="copyAgentPrompt()" class="px-5 py-2.5 rounded-xl bg-[#2997ff] hover:bg-[#0077ed] text-white font-semibold text-xs sm:text-sm font-sans transition-all active:scale-95 shadow-lg shadow-[#2997ff]/20 flex items-center space-x-2">
+              <i id="agent-copy-icon" data-lucide="copy" class="w-4 h-4"></i>
+              <span id="agent-copy-text" data-i18n="btn_copy_agent">Copy Agent Directive</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Formatted Agent Prompt Preview -->
+        <div class="mt-6 p-4 rounded-xl bg-black/80 border border-white/[0.06] font-mono text-xs text-[#d2d2d7] leading-relaxed relative overflow-hidden" data-scroll-slide="agent-preview">
+          <div class="text-[#86868b] select-none mb-2" data-i18n="agent_preview_header">// Copy-paste ready for your AI Agent:</div>
+          <p id="agent-prompt-text" class="text-[#f5f5f7]">Please configure ParaGravity for me to enable parallel Google Antigravity multi-account execution:
+1. Read the setup spec at: https://raw.githubusercontent.com/edison-land/paragravity/main/docs/agent.md
+2. Install ParaGravity on my machine via the official installer:
+   curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash
+3. Create an isolated sandbox profile named "work" inheriting my current settings and MCP tools:
+   pgrav create work -i
+4. Verify the setup with `pgrav list` and confirm when ready.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 4: Technical Specifications Bento Grid (+40% Cascade 3D Motion) -->
+    <section id="specs" class="py-20 px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
+        <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="specs_eyebrow">TECHNICAL BENCHMARKS</span>
+        <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="specs_title">Pure Engineering. Zero Bloat.</h2>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+        <!-- Stat 1 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-1">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0 MB</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat1_label">Background RAM</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat1_desc">
+              Zero persistent daemon processes. Standard system launchers with pure Python 3 runtime.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat1_foot">
+            Standard Library Only
+          </div>
+        </div>
+
+        <!-- Stat 2 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-2">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">100%</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat2_label">Non-Invasive</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat2_desc">
+              Zero binary modification. Official Chromium sandbox flags. Native untouched Google OAuth flow.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat2_foot">
+            Zero Account Risk
+          </div>
+        </div>
+
+        <!-- Stat 3 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-3">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0.2s</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat3_label">Spotlight Ready</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat3_desc">
+              Registered into macOS ~/Applications and Windows Start Menu for instant OS-level searchability.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat3_foot">
+            Cmd + Space & Win + S
+          </div>
+        </div>
+
+        <!-- Stat 4 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-4">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">0700</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat4_label">POSIX Permissions</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat4_desc">
+              Owner-only directory ACLs ensure OAuth tokens and local cache stay strictly unreadable by other users.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat4_foot">
+            Hardware-Level Security
+          </div>
+        </div>
+
+        <!-- Stat 5 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-5">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">-i</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat5_label">Inherit Flag</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat5_desc">
+              One-step inheritance of keybindings, editor configs, skills, and MCP tools while isolating credentials.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat5_foot">
+            Zero Configuration Drift
+          </div>
+        </div>
+
+        <!-- Stat 6 -->
+        <div class="apple-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between h-full" data-scroll-slide="bento-6">
+          <div>
+            <div class="text-4xl sm:text-5xl font-semibold tracking-apple-tight text-white mb-2">Web HUD</div>
+            <div class="text-xs font-mono text-[#2997ff] mb-4" data-i18n="stat6_label">Visual Orchestrator</div>
+            <p class="text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="stat6_desc">
+              Built-in zero-dependency Matrix dashboard and floating widget HUD for multi-instance management.
+            </p>
+          </div>
+          <div class="mt-6 pt-3 border-t border-white/[0.06] text-[11px] font-mono text-[#6e6e73]" data-i18n="stat6_foot">
+            pgrav web & pgrav widget
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: CLI Commands -->
+    <section id="cheatsheet" class="py-20 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
+        <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="cli_eyebrow">COMMAND LINE INTERFACE</span>
+        <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="cli_title">Designed for Developer Velocity</h2>
+      </div>
+
+      <div class="apple-card rounded-2xl p-6 sm:p-8">
+        <div class="space-y-6">
+          <!-- Command 1 -->
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
+            <div class="flex items-center justify-between text-xs font-mono mb-2">
+              <span class="text-white font-medium" data-i18n="cmd1_title">1. Create Profile with Inherited MCP & Settings</span>
+              <span class="text-[#86868b]" data-i18n="cmd1_tag">Flag -i</span>
+            </div>
+            <div class="bg-black/70 rounded-xl p-3 font-mono text-xs sm:text-sm text-[#f5f5f7] flex items-center justify-between border border-white/[0.06]">
+              <code>pgrav create work -i --launch</code>
+              <button onclick="navigator.clipboard.writeText('pgrav create work -i --launch')" class="text-[#86868b] hover:text-white" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd1_desc">Creates isolated sandbox, inherits keybindings/MCPs, creates native macOS .app and launches.</div>
+          </div>
+
+          <!-- Command 2 -->
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
+            <div class="flex items-center justify-between text-xs font-mono mb-2">
+              <span class="text-white font-medium" data-i18n="cmd2_title">2. Inspect Live PIDs and Linked Google Accounts</span>
+              <span class="text-[#86868b]" data-i18n="cmd2_tag">Realtime Status</span>
+            </div>
+            <div class="bg-black/70 rounded-xl p-3 font-mono text-xs sm:text-sm text-[#f5f5f7] flex items-center justify-between border border-white/[0.06]">
+              <code>pgrav list</code>
+              <button onclick="navigator.clipboard.writeText('pgrav list')" class="text-[#86868b] hover:text-white" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd2_desc">Lists running instances, process status, and linked Google accounts.</div>
+          </div>
+
+          <!-- Command 3 -->
+          <div class="border-b border-white/[0.06] pb-5" data-scroll-slide="cmd-item">
+            <div class="flex items-center justify-between text-xs font-mono mb-2">
+              <span class="text-white font-medium" data-i18n="cmd3_title">3. Open Directly into Project Workspace</span>
+              <span class="text-[#86868b]" data-i18n="cmd3_tag">Project Path</span>
+            </div>
+            <div class="bg-black/70 rounded-xl p-3 font-mono text-xs sm:text-sm text-[#f5f5f7] flex items-center justify-between border border-white/[0.06]">
+              <code>pgrav launch work ~/Projects/backend-api</code>
+              <button onclick="navigator.clipboard.writeText('pgrav launch work ~/Projects/backend-api')" class="text-[#86868b] hover:text-white" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd3_desc">Opens directly into target repository workspace with profile context.</div>
+          </div>
+
+          <!-- Command 4 -->
+          <div data-scroll-slide="cmd-item">
+            <div class="flex items-center justify-between text-xs font-mono mb-2">
+              <span class="text-white font-medium" data-i18n="cmd4_title">4. Launch Zero-Dependency Visual Matrix Console</span>
+              <span class="text-[#86868b]" data-i18n="cmd4_tag">Web HUD</span>
+            </div>
+            <div class="bg-black/70 rounded-xl p-3 font-mono text-xs sm:text-sm text-[#f5f5f7] flex items-center justify-between border border-white/[0.06]">
+              <code>pgrav web</code>
+              <button onclick="navigator.clipboard.writeText('pgrav web')" class="text-[#86868b] hover:text-white" title="Copy">
+                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+            <div class="text-xs text-[#86868b] mt-1.5" data-i18n="cmd4_desc">Launches zero-dependency local Web HUD for live process and profile management.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 6: FAQ -->
+    <section id="faq" class="py-20 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+      <div class="text-center mb-16" data-scroll-slide="section-header">
+        <span class="text-xs font-mono uppercase tracking-widest text-[#86868b]" data-i18n="faq_eyebrow">QUESTIONS & ANSWERS</span>
+        <h2 class="text-3xl sm:text-4xl font-semibold text-[#f5f5f7] mt-2 tracking-apple-tight" data-i18n="faq_title">Frequently Asked Questions</h2>
+      </div>
+
+      <div class="space-y-4">
+        <!-- Q1 -->
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-1">
+          <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
+            <span data-i18n="faq_q1">Does this violate Google ToS or risk banning my accounts?</span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <p class="mt-3 text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="faq_a1">
+            No. ParaGravity utilizes standard Chromium command-line options (--user-data-dir), the officially supported sandbox partitioning flag. No binary executables are decompiled or patched, and the native Google Cloud OAuth flow remains untouched.
+          </p>
+        </details>
+
+        <!-- Q2 -->
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-2">
+          <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
+            <span data-i18n="faq_q2">Are my Google OAuth tokens and credentials secure?</span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <p class="mt-3 text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="faq_a2">
+            Yes. All sandboxes reside locally on your disk under ~/.antigravity-profiles/ with owner-only (0700/0600) permissions. ParaGravity contains zero telemetry and makes zero outbound network requests.
+          </p>
+        </details>
+
+        <!-- Q3 -->
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-3">
+          <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
+            <span data-i18n="faq_q3">Can I inherit my keybindings and MCP servers?</span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <p class="mt-3 text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="faq_a3">
+            Yes. Pass -i (or --inherit-config) when provisioning a profile. It automatically clones editor settings and links MCP configurations without leaking credentials or conversation histories.
+          </p>
+        </details>
+
+        <!-- Q4 -->
+        <details class="apple-card rounded-xl p-5 group cursor-pointer" data-scroll-slide="faq-4">
+          <summary class="flex items-center justify-between font-medium text-sm sm:text-base list-none text-white">
+            <span data-i18n="faq_q4">Is Windows supported?</span>
+            <i data-lucide="chevron-down" class="w-4 h-4 text-[#86868b] group-open:rotate-180 transition-transform"></i>
+          </summary>
+          <p class="mt-3 text-xs sm:text-sm text-[#86868b] leading-relaxed" data-i18n="faq_a4">
+            Yes. ParaGravity provides cross-platform parity on macOS and Windows (PowerShell, CMD, and Git Bash MSYS2). It generates native Windows Start Menu shortcuts for Win + S indexing.
+          </p>
+        </details>
+      </div>
+    </section>
+
+    <!-- SECTION 7: Call to Action -->
+    <section class="py-24 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto text-center">
+      <div class="apple-card rounded-3xl p-10 sm:p-14 specular-highlight" data-scroll-slide="cta-card">
+        <h3 class="text-3xl sm:text-4xl font-semibold text-white tracking-apple-tight mb-4" data-i18n="cta_title">
+          Ready to scale your agent workflow?
+        </h3>
+        <p class="text-[#86868b] max-w-xl mx-auto text-sm sm:text-base mb-8" data-i18n="cta_desc">
+          Deploy ParaGravity in seconds with a single terminal command.
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-4">
+          <a href="https://github.com/edison-land/paragravity" target="_blank" rel="noopener noreferrer"
+             class="inline-flex items-center space-x-2.5 px-7 py-3.5 rounded-full bg-[#f5f5f7] hover:bg-white text-black font-semibold text-xs sm:text-sm transition-all hover:scale-105 active:scale-95 shadow-lg">
+            <svg class="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+              <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+            </svg>
+            <span data-i18n="cta_star">Star on GitHub</span>
+          </a>
+          <a href="https://x.com/Edison_aware" target="_blank" rel="noopener noreferrer"
+             class="inline-flex items-center space-x-2.5 px-7 py-3.5 rounded-full border border-white/[0.15] hover:border-white/[0.25] bg-white/[0.04] hover:bg-white/[0.08] text-[#f5f5f7] font-semibold text-xs sm:text-sm transition-all hover:scale-105 active:scale-95">
+            <svg class="w-3.5 h-3.5 fill-current text-[#2997ff] shrink-0" viewBox="0 0 24 24">
+              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+            </svg>
+            <span data-i18n="cta_connect">Connect on X (@Edison_aware)</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Apple Minimal Footer -->
+  <footer class="border-t border-white/[0.08] bg-black py-12 px-4 sm:px-6 lg:px-8 text-xs text-[#6e6e73]">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div>
+        <span data-i18n="footer_brand">ParaGravity &bull; Developed by</span> <a href="https://x.com/Edison_aware" target="_blank" class="text-[#86868b] hover:text-[#f5f5f7] transition-colors">@Edison_aware</a>
+      </div>
+      <div class="flex items-center space-x-6">
+        <a href="https://github.com/edison-land/paragravity" target="_blank" class="hover:text-[#f5f5f7] transition-colors">GitHub</a>
+        <a href="https://x.com/Edison_aware" target="_blank" class="hover:text-[#f5f5f7] transition-colors">X (Twitter)</a>
+        <a href="https://github.com/edison-land/paragravity/blob/main/LICENSE" target="_blank" class="hover:text-[#f5f5f7] transition-colors" data-i18n="footer_mit">MIT License</a>
+      </div>
+    </div>
+    <div class="max-w-7xl mx-auto mt-4 text-[11px] text-[#424245]" data-i18n="footer_disclaimer">
+      ParaGravity is an open-source utility leveraging Chromium sandboxing architecture. Not affiliated with Google LLC.
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Mode Snippets
+    const macCmd = 'curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash';
+    const winCmd = 'git clone https://github.com/edison-land/paragravity.git $HOME\\.paragravity';
+    
+    const agentPromptEN = 'Please configure ParaGravity for me to enable parallel Google Antigravity multi-account execution:\n1. Read the setup spec at: https://raw.githubusercontent.com/edison-land/paragravity/main/docs/agent.md\n2. Install ParaGravity on my machine via the official installer:\n   curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash\n3. Create an isolated sandbox profile named "work" inheriting my current settings and MCP tools:\n   pgrav create work -i\n4. Verify the setup with `pgrav list` and confirm when ready.';
+
+    const agentPromptZH = '请帮我在本机配置 ParaGravity 以开启 Google Antigravity 多账号并行开发：\n1. 阅读配置规范指南：https://raw.githubusercontent.com/edison-land/paragravity/main/docs/agent.md\n2. 运行官方安装脚本安装 ParaGravity：\n   curl -fsSL https://raw.githubusercontent.com/edison-land/paragravity/main/install.sh | bash\n3. 创建一个名为 "work" 的新隔离沙箱，并继承宿主机快捷键与 MCP 配置：\n   pgrav create work -i\n4. 使用 `pgrav list` 验证安装并汇报配置结果。';
+
+    let currentMode = 'mac';
+
+    function switchMode(mode) {
+      currentMode = mode;
+      const codeEl = document.getElementById('install-cmd');
+      const prefixEl = document.getElementById('prompt-prefix');
+      const helperEl = document.getElementById('box-helper-text');
+      const modeLabel = document.getElementById('terminal-mode-label');
+
+      const tabMac = document.getElementById('tab-mac');
+      const tabWin = document.getElementById('tab-win');
+      const tabAgent = document.getElementById('tab-agent');
+
+      // Reset standard OS tabs
+      tabMac.className = 'px-3 py-1 rounded-md text-[#86868b] hover:text-white transition-all';
+      tabWin.className = 'px-3 py-1 rounded-md text-[#86868b] hover:text-white transition-all';
+
+      if (mode === 'mac') {
+        tabMac.className = 'px-3 py-1 rounded-md text-white bg-white/[0.12] font-medium transition-all shadow-sm';
+        // Agent tab retains its distinctive blue highlight badge at all times
+        tabAgent.className = 'px-3 py-1 rounded-md text-[#2997ff] bg-[#2997ff]/10 border border-[#2997ff]/30 hover:bg-[#2997ff]/20 font-medium transition-all';
+        codeEl.innerText = macCmd;
+        prefixEl.innerText = '$';
+        prefixEl.className = 'text-[#86868b] select-none';
+        modeLabel.innerText = currentLang === 'en' ? 'Interactive Terminal (macOS)' : '开发者终端 (macOS)';
+        helperEl.innerText = currentLang === 'en' 
+          ? 'Run in your terminal. Automatically sets up isolated sandboxes and native macOS launchers.'
+          : '在终端运行即可完成安装。自动配置独立沙箱并在 ~/Applications 生成 Spotlight 原生启动器。';
+      } else if (mode === 'win') {
+        tabWin.className = 'px-3 py-1 rounded-md text-white bg-white/[0.12] font-medium transition-all shadow-sm';
+        // Agent tab retains its distinctive blue highlight badge at all times
+        tabAgent.className = 'px-3 py-1 rounded-md text-[#2997ff] bg-[#2997ff]/10 border border-[#2997ff]/30 hover:bg-[#2997ff]/20 font-medium transition-all';
+        codeEl.innerText = winCmd;
+        prefixEl.innerText = '>';
+        prefixEl.className = 'text-[#86868b] select-none';
+        modeLabel.innerText = currentLang === 'en' ? 'Interactive Terminal (Windows)' : '开发者终端 (Windows)';
+        helperEl.innerText = currentLang === 'en'
+          ? 'Clone into user home and add bin/ to PATH. Windows Start Menu shortcuts generated.'
+          : '克隆至本地并将 bin 加入环境变量。自动注入 Windows 开始菜单快捷方式。';
+      } else if (mode === 'agent') {
+        // Elevated to full solid active state when selected
+        tabAgent.className = 'px-3 py-1 rounded-md text-white bg-[#2997ff] border border-[#2997ff] font-semibold shadow-md shadow-[#2997ff]/25 transition-all';
+        codeEl.innerText = currentLang === 'en' ? agentPromptEN : agentPromptZH;
+        prefixEl.innerText = '#';
+        prefixEl.className = 'text-[#2997ff] select-none font-bold';
+        modeLabel.innerText = currentLang === 'en' ? 'AI Agent Instruction' : 'AI Agent 自动接管指令';
+        helperEl.innerText = currentLang === 'en'
+          ? 'Copy this prompt and paste directly into your AI Agent.'
+          : '一键复制此指令并直接粘贴发给你的 AI 智能 Agent，即可自主完成全部配置。';
+      }
+    }
+
+    // Copy to clipboard
+    function copyCommand() {
+      const code = document.getElementById('install-cmd').innerText;
+      navigator.clipboard.writeText(code).then(() => {
+        const textEl = document.getElementById('copy-text');
+        const prevText = textEl.innerText;
+        textEl.innerText = currentLang === 'en' ? 'Copied' : '已复制';
+        setTimeout(() => {
+          textEl.innerText = prevText;
+        }, 2000);
+      });
+    }
+
+    function copyAgentPrompt() {
+      const prompt = currentLang === 'en' ? agentPromptEN : agentPromptZH;
+      navigator.clipboard.writeText(prompt).then(() => {
+        const textEl = document.getElementById('agent-copy-text');
+        textEl.innerText = currentLang === 'en' ? 'Copied Directive!' : '已复制指令！';
+        setTimeout(() => {
+          textEl.innerText = currentLang === 'en' ? 'Copy Agent Directive' : '复制 Agent 接管指令';
+        }, 2000);
+      });
+    }
+
+    // ==========================================
+    // Real-Time Multi-Dimensional Scroll Engine
+    // Tailored Physical 3D Motions per Section
+    // Dynamic Navbar Active Indicator Tracking
+    // ==========================================
+    const scrollElements = document.querySelectorAll('[data-scroll-slide]');
+    const navItems = document.querySelectorAll('.nav-item');
+    const sections = ['overview', 'architecture', 'agent-setup', 'specs', 'cheatsheet', 'faq']
+      .map(id => document.getElementById(id))
+      .filter(Boolean);
+
+    function updateScrollEffects() {
+      const vh = window.innerHeight;
+      const viewportCenter = vh / 2;
+
+      // 1. Dynamic Navbar Active Tracker
+      let closestSectionId = '';
+      let minDistance = Infinity;
+
+      sections.forEach(sec => {
+        const rect = sec.getBoundingClientRect();
+        const secCenter = rect.top + rect.height / 2;
+        const dist = Math.abs(secCenter - viewportCenter);
+        if (dist < minDistance && rect.top < vh * 0.75 && rect.bottom > vh * 0.25) {
+          minDistance = dist;
+          closestSectionId = sec.id;
+        }
+      });
+
+      navItems.forEach(item => {
+        const target = item.getAttribute('data-nav');
+        if (target === closestSectionId) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+
+      // 2. Real-Time Multi-Dimensional Scroll Engine
+      scrollElements.forEach(el => {
+        const rect = el.getBoundingClientRect();
+        const type = el.getAttribute('data-scroll-slide');
+        const elCenter = rect.top + rect.height / 2;
+
+        // Continuous reversible signed distance from viewport center:
+        // 0 when centered, +1 when 65% vh below (entering), -1 when 65% vh above (exiting)
+        const maxDist = vh * 0.65;
+        const signedDist = Math.min(Math.max((elCenter - viewportCenter) / maxDist, -1.2), 1.2);
+        const absDist = Math.min(Math.abs(signedDist), 1);
+        const progress = 1 - absDist;
+
+        let translateX = 0;
+        let translateY = 0;
+        let translateZ = 0;
+        let rotateX = 0;
+        let rotateY = 0;
+        let rotateZ = 0;
+        let scale = 1;
+        let opacity = 1;
+
+        switch (type) {
+          // Section 1: Overview - 3D Flight & Symmetrical Docking (Zero Blur, Crisp Text)
+          case 'split-left':
+            translateX = -140 * signedDist;
+            translateY = 25 * absDist;
+            rotateY = 12 * signedDist;
+            rotateZ = -2 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            break;
+
+          case 'split-right':
+            translateX = 140 * signedDist;
+            translateY = 25 * absDist;
+            rotateY = -12 * signedDist;
+            rotateZ = 2 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            break;
+
+          case 'banner-pill':
+            translateY = 30 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          // Section 2: Architecture - Perfectly Symmetrical Level Docking (Zero Vertical Discrepancy)
+          case 'arch-left':
+          case 'pain-sink':
+            translateX = -40 * signedDist;
+            translateY = 40 * signedDist;
+            rotateY = 3 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          case 'arch-right':
+          case 'solution-soar':
+            translateX = 40 * signedDist;
+            translateY = 40 * signedDist;
+            rotateY = -3 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          // Section 3: Agent Setup - Holographic Capsule Expansion
+          case 'agent-card':
+            translateY = 55 * signedDist;
+            rotateX = 8 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.70 + 0.30 * progress, 1);
+            break;
+
+          case 'agent-preview':
+            translateY = 30 * signedDist;
+            scale = 0.94 + 0.06 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
+            break;
+
+          // Section 4: Specs - Level Horizontal Planes (Row 1 and Row 2 perfectly level)
+          case 'bento-1':
+          case 'bento-2':
+          case 'bento-3':
+            translateY = 40 * signedDist;
+            rotateX = 5 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          case 'bento-4':
+          case 'bento-5':
+          case 'bento-6':
+            translateY = 55 * signedDist;
+            rotateX = 5 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          // Section 5: Commands - Symmetrical Unified Alignment (Zero Horizontal Shearing)
+          case 'cmd-item':
+          case 'cmd-slide-left':
+          case 'cmd-slide-right':
+            translateY = 25 * signedDist;
+            scale = 0.96 + 0.04 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
+            break;
+
+          // Section 6: FAQ - 3D Folding Deck Fan
+          case 'faq-1':
+            translateY = 30 * signedDist;
+            rotateX = 7 * signedDist;
+            scale = 0.94 + 0.06 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          case 'faq-2':
+            translateY = 45 * signedDist;
+            rotateX = 10 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          case 'faq-3':
+            translateY = 60 * signedDist;
+            rotateX = 13 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          case 'faq-4':
+            translateY = 75 * signedDist;
+            rotateX = 16 * signedDist;
+            scale = 0.88 + 0.12 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          // Section Header titles: elegant downward tracking expansion
+          case 'section-header':
+            translateY = -25 * signedDist;
+            scale = 0.95 + 0.05 * progress;
+            opacity = Math.min(0.80 + 0.20 * progress, 1);
+            break;
+
+          // Call to Action Card
+          case 'cta-card':
+            translateY = 50 * signedDist;
+            scale = 0.90 + 0.10 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+
+          default:
+            translateY = 35 * signedDist;
+            scale = 0.92 + 0.08 * progress;
+            opacity = Math.min(0.75 + 0.25 * progress, 1);
+            break;
+        }
+
+        el.style.transform = `perspective(1000px) translate3d(${translateX.toFixed(1)}px, ${translateY.toFixed(1)}px, ${translateZ.toFixed(1)}px) rotateX(${rotateX.toFixed(1)}deg) rotateY(${rotateY.toFixed(1)}deg) rotateZ(${rotateZ.toFixed(1)}deg) scale(${scale.toFixed(3)})`;
+        el.style.opacity = Math.max(opacity, 0).toFixed(3);
+        el.style.filter = 'none';
+      });
+    }
+
+    let isTicking = false;
+    function requestScrollUpdate() {
+      if (!isTicking) {
+        window.requestAnimationFrame(() => {
+          updateScrollEffects();
+          isTicking = false;
+        });
+        isTicking = true;
+      }
+    }
+
+    window.addEventListener('scroll', requestScrollUpdate, { passive: true });
+    window.addEventListener('resize', requestScrollUpdate, { passive: true });
+    updateScrollEffects();
+
+    // ==========================================
+    // Complete 100% Bilingual Dictionary
+    // Strictly 2 balanced lines in Chinese Hero
+    // ==========================================
+    const i18nData = {
+      en: {
+        nav_overview: "Overview",
+        nav_architecture: "Architecture",
+        nav_agent: "Agent Prompt",
+        nav_specs: "Specifications",
+        nav_commands: "Commands",
+        nav_faq: "FAQ",
+        hero_eyebrow_1: "macOS & Windows",
+        hero_eyebrow_2: "Multi-Account Concurrency",
+        hero_title_1: "Run Multiple Antigravity Accounts.",
+        hero_title_2: "Independent Sandboxes. Zero Quota Stalls.",
+        hero_desc: "Run multiple Google accounts side-by-side in strictly isolated sandboxes without relogging. Dual quota pools prevent workflow stalls, instant Spotlight access, 0 MB background RAM.",
+        box_label_human: "Interactive Setup",
+        tab_agent_btn: "Copy for Agent",
+        btn_copy: "Copy",
+        box_hint_human: "Run in your terminal. Automatically sets up isolated sandboxes and native macOS launchers.",
+        btn_github: "View Source on GitHub",
+        btn_follow: "Follow @Edison_aware",
+        showcase_eyebrow: "CONCURRENT MULTI-ACCOUNT WORKFLOW",
+        showcase_title: "Independent Sandboxes. Zero Quota Interruption.",
+        showcase_sub: "Keep multiple Google accounts open simultaneously with completely separate rate limits.",
+        spotlight_banner: "Spotlight: Type \"Antigravity (work)\" or \"Antigravity (personal)\" • Instant 0.2s launch",
+        active_instances_badge: "Active Sandboxes: work, personal (Concurrent)",
+        win1_tag: "Enterprise Workspace",
+        win1_task: "Task: Core Services & Internal Repositories",
+        win1_b1: "• Isolated chat context & storage, strictly preventing commercial leakage",
+        win1_b2: "• Enterprise Workspace dedicated quota pool, zero personal crossover",
+        win1_b3: "• Status: Executing migration scripts & tests...",
+        win2_tag: "Personal Pro",
+        win2_task: "Task: Open Source & Side Projects",
+        win2_b1: "• Cloned keybindings, themes & MCP servers (-i)",
+        win2_b2: "• Independent personal quota, completely unharmed by work limit hit",
+        win2_b3: "• Status: Generating UI modules in separate window",
+        arch_eyebrow: "THE ARCHITECTURAL DIFFERENCE",
+        arch_title: "Engineered to Solve Native Limitations",
+        pain_header: "Standard Single-Account Setup",
+        pain_b1: "<strong>Single Quota Ceiling:</strong> Frequent 429 quota exhaustion. Tasks halt while rate limits cooldown.",
+        pain_b2: "<strong>Disruptive Account Switching:</strong> Switching accounts forces full sign-out, aborting running agent trajectories.",
+        pain_b3: "<strong>Context & Repository Pollution:</strong> Enterprise Workspace code and personal repositories commingle in one environment.",
+        pain_b4: "<strong>Blank Slate Friction:</strong> Manually passing data dirs loses custom keybindings, MCP servers, and agent skills.",
+        sol_header: "ParaGravity Architecture",
+        sol_b1: "<strong>Multi-Quota Bandwidth:</strong> Each instance connects to its own Google account with an independent quota pool.",
+        sol_b2: "<strong>Native Side-by-Side Windows:</strong> Keep corporate and personal accounts running in split screens simultaneously.",
+        sol_b3: "<strong>Hardware-Grade Sandbox:</strong> Official Chromium <code>--user-data-dir</code> and POSIX <code>0700</code> permission isolation.",
+        sol_b4: "<strong>Zero-Friction Inheritance:</strong> Pass <code>-i</code> to clone settings and link MCP tools while isolating credentials.",
+        agent_badge: "MACHINE READABLE SPECIFICATION",
+        agent_title: "Hand It Off to Your AI Agent",
+        agent_desc: "Don't want to run manual setup commands? Simply paste this directive into your AI Agent.",
+        agent_preview_header: "// Copy-paste ready for your AI Agent:",
+        btn_copy_agent: "Copy Agent Directive",
+        specs_eyebrow: "TECHNICAL BENCHMARKS",
+        specs_title: "Pure Engineering. Zero Bloat.",
+        stat1_label: "Background RAM",
+        stat1_desc: "Zero persistent daemon processes. Standard system launchers with pure Python 3 runtime.",
+        stat1_foot: "Standard Library Only",
+        stat2_label: "Non-Invasive",
+        stat2_desc: "Zero binary modification. Official Chromium sandbox flags. Native untouched Google OAuth flow.",
+        stat2_foot: "Zero Account Risk",
+        stat3_label: "Spotlight Ready",
+        stat3_desc: "Registered into macOS ~/Applications and Windows Start Menu for instant OS-level searchability.",
+        stat3_foot: "Cmd + Space & Win + S",
+        stat4_label: "POSIX Permissions",
+        stat4_desc: "Owner-only directory ACLs ensure OAuth tokens and local cache stay strictly unreadable by other users.",
+        stat4_foot: "Hardware-Level Security",
+        stat5_label: "Inherit Flag",
+        stat5_desc: "One-step inheritance of keybindings, editor configs, skills, and MCP tools while isolating credentials.",
+        stat5_foot: "Zero Configuration Drift",
+        stat6_label: "Visual Orchestrator",
+        stat6_desc: "Built-in zero-dependency Matrix dashboard and floating widget HUD for multi-instance management.",
+        stat6_foot: "pgrav web & pgrav widget",
+        cli_eyebrow: "COMMAND LINE INTERFACE",
+        cli_title: "Designed for Developer Velocity",
+        cmd1_title: "1. Create Profile with Inherited MCP & Settings",
+        cmd1_tag: "Flag -i",
+        cmd1_desc: "Creates isolated sandbox, inherits keybindings/MCPs, creates native macOS .app and launches.",
+        cmd2_title: "2. Inspect Live PIDs and Linked Google Accounts",
+        cmd2_tag: "Realtime Status",
+        cmd2_desc: "Lists running instances, process status, and linked Google accounts.",
+        cmd3_title: "3. Open Directly into Project Workspace",
+        cmd3_tag: "Project Path",
+        cmd3_desc: "Opens directly into target repository workspace with profile context.",
+        cmd4_title: "4. Launch Zero-Dependency Visual Matrix Console",
+        cmd4_tag: "Web HUD",
+        cmd4_desc: "Launches zero-dependency local Web HUD for live process and profile management.",
+        faq_eyebrow: "QUESTIONS & ANSWERS",
+        faq_title: "Frequently Asked Questions",
+        faq_q1: "Does this violate Google ToS or risk banning my accounts?",
+        faq_a1: "No. ParaGravity utilizes standard Chromium command-line options (--user-data-dir), the officially supported sandbox partitioning flag. No binary executables are decompiled or patched, and the native Google Cloud OAuth flow remains untouched.",
+        faq_q2: "Are my Google OAuth tokens and credentials secure?",
+        faq_a2: "Yes. All sandboxes reside locally on your disk under ~/.antigravity-profiles/ with owner-only (0700/0600) permissions. ParaGravity contains zero telemetry and makes zero outbound network requests.",
+        faq_q3: "Can I inherit my keybindings and MCP servers?",
+        faq_a3: "Yes. Pass -i (or --inherit-config) when provisioning a profile. It automatically clones editor settings and links MCP configurations without leaking credentials or conversation histories.",
+        faq_q4: "Is Windows supported?",
+        faq_a4: "Yes. ParaGravity provides cross-platform parity on macOS and Windows (PowerShell, CMD, and Git Bash MSYS2). It generates native Windows Start Menu shortcuts for Win + S indexing.",
+        cta_title: "Ready to scale your agent workflow?",
+        cta_desc: "Deploy ParaGravity in seconds with a single terminal command.",
+        cta_star: "Star on GitHub",
+        cta_connect: "Connect on X (@Edison_aware)",
+        footer_brand: "ParaGravity • Developed by",
+        footer_mit: "MIT License",
+        footer_disclaimer: "ParaGravity is an open-source utility leveraging Chromium sandboxing architecture. Not affiliated with Google LLC."
+      },
+      zh: {
+        nav_overview: "产品总览",
+        nav_architecture: "架构设计",
+        nav_agent: "给 Agent 的指令",
+        nav_specs: "硬核指标",
+        nav_commands: "常用命令",
+        nav_faq: "常见问题",
+        hero_eyebrow_1: "macOS & Windows 跨平台",
+        hero_eyebrow_2: "多账号同屏独立并发",
+        hero_title_1: "让 Antigravity 真正多开分身",
+        hero_title_2: "多账号同屏独立并发 · 告别配额卡顿",
+        hero_desc: "无需反复注销登录，在本地开辟完全物理隔离的独立沙箱。支持工作与个人多账号并列写代码，双路额度互不干扰，Spotlight 一秒唤起，0 MB 后台常驻内存。",
+        box_label_human: "交互式安装",
+        tab_agent_btn: "复制给 Agent",
+        btn_copy: "复制",
+        box_hint_human: "在终端运行即可完成安装。自动配置独立沙箱并在 ~/Applications 生成 Spotlight 原生启动器。",
+        btn_github: "GitHub 开源仓库",
+        btn_follow: "关注作者 @Edison_aware",
+        showcase_eyebrow: "同屏多账号独立并发",
+        showcase_title: "独立沙箱运行 · 告别单号配额卡顿",
+        showcase_sub: "工作号与个人号同屏并列运行，各用各的配额池，互不抢占。",
+        spotlight_banner: "Spotlight 聚光灯秒搜：键入 \"Antigravity (work)\" 或 \"Antigravity (personal)\" · 0.2 秒直达",
+        active_instances_badge: "活跃沙箱：work, personal (同时运行中)",
+        win1_tag: "企业 Workspace",
+        win1_task: "任务：公司核心业务微服务与内部代码库",
+        win1_b1: "• 独立聊天上下文与本地存储，严防商业代码污染",
+        win1_b2: "• 使用企业 Workspace 专属模型额度，专注工作交付",
+        win1_b3: "• 状态：执行微服务重构脚本与测试中...",
+        win2_tag: "个人账号",
+        win2_task: "任务：开源项目 / 个人 Side Project 协同开发",
+        win2_b1: "• 一键克隆宿主快捷键、主题与 MCP 工具 (-i)",
+        win2_b2: "• 当工作号遭遇 429 报错时，个人窗口配额完好，随时接力",
+        win2_b3: "• 状态：在独立窗口中并行编写开源代码",
+        arch_eyebrow: "核心架构差异",
+        arch_title: "直击原生痛点，专为生产力重构",
+        pain_header: "原生单账号痛点",
+        pain_b1: "<strong>单账号额度硬顶：</strong>一旦频繁遭遇 429 配额用尽，所有开发直接停摆，只能干等重置。",
+        pain_b2: "<strong>会话破坏式切号：</strong>官方换号必须彻底注销登出，正在运行的 Agent 轨迹被迫强制终止。",
+        pain_b3: "<strong>上下文与记录污染：</strong>公司企业级代码和个人私有项目混在同一个历史记录中，存在合规风险。",
+        pain_b4: "<strong>手动多开配置繁琐：</strong>手动指定目录会导致快捷键、编辑器偏好以及 MCP 工具配置全部丢失。",
+        sol_header: "ParaGravity 架构优势",
+        sol_b1: "<strong>多路配额，避免单号撞墙停工：</strong>每个窗口绑定独立 Google 账号，多路额度池随开随用，工作流永不中断。",
+        sol_b2: "<strong>原生同屏并发，告别退登切号：</strong>彻底终结官方换号登出流程，公司与个人账号并列分屏编码。",
+        sol_b3: "<strong>物理级硬隔离，保障企业合规：</strong>基于 Chromium 官方 <code>--user-data-dir</code> 与 POSIX <code>0700</code>，Token、历史记录、扩展物理隔绝。",
+        sol_b4: "<strong>-i 参数一键克隆，告别空白配置：</strong>自动继承宿主快捷键、偏好设置和 MCP 服务，同时严格物理隔离账号凭据。",
+        agent_badge: "机器可读自动化配置规范",
+        agent_title: "直接把配置任务交给你的 AI Agent",
+        agent_desc: "不想自己手动敲命令？直接复制这段指令发给你的 AI 智能 Agent，即可自动阅读指南并完成安装与配置。",
+        agent_preview_header: "// 可直接复制发给你的 AI 智能 Agent：",
+        btn_copy_agent: "复制 Agent 接管指令",
+        specs_eyebrow: "硬核技术指标",
+        specs_title: "极致纯粹工程，拒绝多余冗余",
+        stat1_label: "闲置后台内存",
+        stat1_desc: "零后台常驻守护进程。基于系统原生启动机制，由 Python 3 标准库纯粹驱动。",
+        stat1_foot: "仅依赖 Python 原生标准库",
+        stat2_label: "100% 零侵入",
+        stat2_desc: "零二进制篡改。基于 Chromium 官方原生沙箱指令，官方 Google OAuth 鉴权原汁原味。",
+        stat2_foot: "零封号与配置损坏风险",
+        stat3_label: "Spotlight 毫秒直达",
+        stat3_desc: "已注册至 macOS ~/Applications 与 Windows 开始菜单，支持系统级毫秒直达。",
+        stat3_foot: "Cmd + Space & Win + S",
+        stat4_label: "POSIX 权限隔离",
+        stat4_desc: "严格的 0700/0600 文件属主权限，确保 OAuth Token 与会话隐私绝对不外泄。",
+        stat4_foot: "系统级凭据物理防护",
+        stat5_label: "一键配置继承",
+        stat5_desc: "带 -i 参数一键克隆设置、快捷键、MCP 与技能，凭据与历史自动隔离。",
+        stat5_foot: "告别空画布重新配置烦恼",
+        stat6_label: "多实例视觉编排",
+        stat6_desc: "内置零外部依赖的矩阵控制台与极简悬浮小组件，支持多实例批量管理与平铺。",
+        stat6_foot: "pgrav web & pgrav widget",
+        cli_eyebrow: "极简命令行",
+        cli_title: "为极客的高效工作流而生",
+        cmd1_title: "1. 创建新实例并无损继承 MCP 与快捷键配置",
+        cmd1_tag: "-i 参数",
+        cmd1_desc: "创建全新独立沙箱，克隆宿主配置与技能，生成 macOS 原生 .app 并立即启动。",
+        cmd2_title: "2. 实时查看全部实例运行状态与关联 Google 账号",
+        cmd2_tag: "实时状态",
+        cmd2_desc: "列出当前运行进程 PID、沙箱目录及绑定的 Google 邮箱。",
+        cmd3_title: "3. 指定项目工作目录直接唤起实例",
+        cmd3_tag: "项目路径直达",
+        cmd3_desc: "直接携带项目工作目录路径启动沙箱，自动切换并载入指定工程。",
+        cmd4_title: "4. 唤起零依赖的可视化矩阵控制台",
+        cmd4_tag: "Web HUD 控制台",
+        cmd4_desc: "一键启动本地轻量 Web 管理界面，支持实例拓扑监控与一键平铺编排。",
+        faq_eyebrow: "答疑解惑",
+        faq_title: "常见问题解答",
+        faq_q1: "使用这个工具会违反 Google 规则或导致封号吗？",
+        faq_a1: "不会。ParaGravity 仅使用 Chromium 官方标准支持的 --user-data-dir 参数隔离机制，未做任何二进制修改或 API 拦截，Google OAuth 鉴权流程 100% 官方正规。",
+        faq_q2: "我的账号 Token 和隐私数据安全吗？",
+        faq_a2: "绝对安全。所有实例沙箱均保存在本地 ~/.antigravity-profiles/ 且具有严格的 0700/0600 用户属主权限，无任何第三方网络上传或数据遥测代码。",
+        faq_q3: "新开的实例能保留我原先配置的快捷键和 MCP 吗？",
+        faq_a3: "完全可以！创建时加上 -i (或 --inherit-config) 参数，即可无缝继承设置、快捷键、MCP 和自定义技能，同时自动排查并隔离账号凭据和会话。",
+        faq_q4: "支持 Windows 系统吗？",
+        faq_a4: "全面支持！已完整适配 macOS 以及 Windows（PowerShell、CMD、Git Bash）。在 Windows 上会自动生成桌面与开始菜单快捷方式，支持 Win + S 秒搜启动。",
+        cta_title: "准备好让 Agent 生产力翻倍了吗？",
+        cta_desc: "一行命令即可完成安装，立刻开启你的 Antigravity 极致工作流。",
+        cta_star: "在 GitHub 标星",
+        cta_connect: "在 X 上关注 @Edison_aware",
+        footer_brand: "ParaGravity • 开发者：",
+        footer_mit: "MIT 开源协议",
+        footer_disclaimer: "ParaGravity 是一款基于 Chromium 原生沙箱架构构建的开源实用工具，与 Google LLC 无从属或商业关联。"
+      }
+    };
+
+    let currentLang = 'en';
+    let isLangTransitioning = false;
+
+    function setLanguage(lang) {
+      currentLang = lang;
+      document.getElementById('lang-label').innerText = lang === 'en' ? '中文' : 'EN';
+      const dict = i18nData[lang];
+
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.innerHTML = dict[key];
+        }
+      });
+
+      // Synchronize active terminal tab, label, helper text, and code
+      switchMode(currentMode);
+
+      // Sync preview text below
+      document.getElementById('agent-prompt-text').innerText = lang === 'en' ? agentPromptEN : agentPromptZH;
+    }
+
+    function toggleLanguage() {
+      if (isLangTransitioning) return;
+      isLangTransitioning = true;
+
+      const nextLang = currentLang === 'en' ? 'zh' : 'en';
+      const langToggleBtn = document.getElementById('lang-toggle');
+      const globeIcon = langToggleBtn ? langToggleBtn.querySelector('i') : null;
+
+      if (globeIcon) {
+        globeIcon.style.transition = 'transform 0.45s cubic-bezier(0.16, 1, 0.3, 1)';
+        globeIcon.style.transform = nextLang === 'zh' ? 'rotate(180deg)' : 'rotate(0deg)';
+      }
+
+      // Collect translatable elements across the document
+      const translatableElements = document.querySelectorAll(
+        '[data-i18n], #install-cmd, #prompt-prefix, #agent-prompt-text, #lang-label, #box-helper-text, #terminal-mode-label'
+      );
+
+      // Phase 1: Graceful dissolve out with blur and micro-lift
+      translatableElements.forEach(el => el.classList.add('lang-fade-out'));
+
+      setTimeout(() => {
+        // Phase 2: Update content while invisible
+        setLanguage(nextLang);
+
+        // Phase 3: Prepare from below
+        translatableElements.forEach(el => {
+          el.classList.remove('lang-fade-out');
+          el.classList.add('lang-fade-in-prep');
+        });
+
+        // Force browser layout reflow
+        void document.body.offsetHeight;
+
+        // Phase 4: Animate in with Apple keynote spring ease
+        requestAnimationFrame(() => {
+          translatableElements.forEach(el => {
+            el.classList.remove('lang-fade-in-prep');
+            el.classList.add('lang-fade-in-active');
+          });
+
+          setTimeout(() => {
+            translatableElements.forEach(el => el.classList.remove('lang-fade-in-active'));
+            isLangTransitioning = false;
+            updateScrollEffects();
+          }, 320);
+        });
+      }, 160);
+    }
+
+    document.getElementById('lang-toggle').addEventListener('click', toggleLanguage);
+  </script>
+</body>
+</html>

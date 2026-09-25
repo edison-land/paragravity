@@ -3,11 +3,12 @@
 > **Google Antigravity 原生非侵入式多账号并行与沙盒管理器。**  
 > 支持在 macOS 和 Windows 上同时并行开启多个独立的 Antigravity 窗口，左右分屏协同开发，彻底解决单账号配额限制。
 
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 | [产品主页 / 文档](https://edison-land.github.io/paragravity)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: macOS | Windows](https://img.shields.io/badge/Platform-macOS%20%7C%20Windows-lightgrey.svg)]()
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-yellow.svg)]()
+[![Follow on X](https://img.shields.io/badge/X-@Edison__aware-black?logo=x)](https://x.com/Edison_aware)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
 
 ---
