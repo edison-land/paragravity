@@ -1,8 +1,8 @@
 class Paragravity < Formula
   desc "Parallel multi-account and sandbox manager for Google Antigravity"
   homepage "https://github.com/edison-land/paragravity"
-  url "https://github.com/edison-land/paragravity/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "530b1112a0f5a232906aae898de5a00a0dafb8ee510e84f510c70c48fbaae466"
+  url "https://github.com/edison-land/paragravity/archive/refs/tags/v1.2.0.tar.gz"
+  sha256 "fde68373db43d003f44c8f1e878a8efa7db52e4fde98233ff45f5184d6f5f4eb"
   license "MIT"
 
   depends_on :macos
