@@ -19,8 +19,35 @@
 - 🛡️ **100% 零侵入安全架构**：纯粹基于 Chromium/Electron 官方标准 `--user-data-dir` 隔离。绝不给二进制打补丁、不篡改内部 SQLite 数据库，零封号与配置损坏风险。
 - 🔑 **纯官方原生 OAuth**：完整保留官方 Google Cloud 登录与鉴权链路，浏览器授权跳转与 Token 自动刷新 100% 丝滑顺畅。
 - 🔍 **操作系统原生集成**：自动在 macOS 生成带独立图标的 `.app`（Spotlight 毫秒直达），或在 Windows 桌面及开始菜单生成原生快捷方式（`.lnk`，Windows 搜索直达）。
-- ⚡ **零后台常驻与极度轻量**：没有吃内存的常驻守护进程（闲置内存占用 0 MB）。纯 Python 3 驱动，零外部 pip 或 npm 依赖。
-- 🗂️ **环境物理级硬隔离**：每个分身拥有完全独立的插件扩展、本地存储、IndexedDB 与聊天记录，开发环境与主账号互不干扰。
+- ⚡ **零后台常驻与极度轻量**：纯 Python 3 驱动，零外部 pip 或 npm 依赖；可选开启轻量 LaunchAgent 实时同步守护（空闲 ~0 MB）。
+- 🗂️ **凭证硬隔离 + 配置实时同步**：各分身独立隔离 Google OAuth 凭证、Cookie、对话历史与 `remoteControlHostname`；同时支持将宿主机与全部分身的 Projects、Skills、Plugins、Hooks 与 `agy` CLI 配置实时同步。
+
+---
+
+## 🆕 v1.3.0 新增特性
+
+1. **Antigravity 2.0 登录态精准识别**：
+   - 完整兼容 Antigravity 2.0 JSON 格式 `jetski-standalone-oauth-token` 与 `agy` CLI Token，支持通过 `refresh_token` 识别活跃登录会话，消除 Python 3.15 下的 `FutureWarning` 与 1 小时 `access_token` 时间戳导致的误报。
+   - `pgrav list` 支持同时展示本机真实 Antigravity（`host`）与所有分身的运行状态、PID、绑定 Google 账号及当前 `agy` CLI 绑定标记 `[★ agy CLI]`；即使在分身集成终端内运行也能正确解析真实主目录。
+2. **`agy` CLI 随分身一键联动切换（免二次登录）**：
+   - 自动在桌面端 Token（`~/.gemini/jetski-standalone-oauth-token`）与 CLI Token（`~/.gemini/antigravity-cli/antigravity-oauth-token`）之间进行双向镜像桥接。
+   - 提供轻量 `agy` PATH Shim，一条命令切换终端中 `agy` 所使用的账号与沙盒：
+     ```bash
+     pgrav use 20x        # 全局切换 agy CLI 到分身 20x（运行 agy 即用该账号）
+     pgrav use host       # 切回宿主机真实 Antigravity（使用系统 Keychain）
+     pgrav current        # 查看当前 agy CLI 绑定的目标分身与账号
+     pgrav cli uta -c     # 仅本次运行指定分身的 agy（不改全局默认）
+     eval "$(pgrav env uta)"  # 仅当前终端标签页生效
+     ```
+3. **宿主机与全部分身的双层实时全量数据同步**：
+   - **第一层（0ms 内核级目录软链中枢）**：无损合并并统一软链 `~/.gemini/config/` 下的 `projects`（自动去重 `swarm/swarm_board`）、`skills`、`plugins`、`hooks`、`rules`、`agents`、`workflows`、`global_workflows`、`sidecars` 与 `commands`，并补齐分身 `HOME` 常用开发目录软链（`.agents`、`work`、`orca`、`reports`、`.local` 等）。
+   - **第二层（字段感知双向同步守护）**：通过 macOS LaunchAgent (`com.paragravity.sync`) 实时双向同步原子写入的配置文件——`config.json`（同步插件与偏好，保留各实例独立的 `remoteControlHostname`）、`mcp_config.json`、`hooks.json`、`antigravity-cli/settings.json`、`GEMINI.md`、`AGENTS.md` 等。
+     ```bash
+     pgrav sync start     # 启用并启动实时同步后台服务
+     pgrav sync status    # 查看同步状态与共享 Projects / Skills / Plugins 数量
+     pgrav sync now       # 立即手动触发一次全量同步
+     ```
+     *新建分身默认自动接入同步；如需彻底隔离配置，创建时可传入 `pgrav create dev --no-sync`。*
 
 ---
 

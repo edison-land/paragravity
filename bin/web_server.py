@@ -25,8 +25,9 @@ except ImportError:
         daemon_threads = True
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+_LOCAL_CLI = Path(__file__).resolve().parent / "paragravity"
+CLI_PATH = _LOCAL_CLI if _LOCAL_CLI.is_file() else (REPO_ROOT / "bin" / "paragravity")
 DASHBOARD_DIST = REPO_ROOT / "dashboard" / "dist"
-CLI_PATH = REPO_ROOT / "bin" / "paragravity"
 
 # mimetypes reads the Windows registry and may report .js as text/plain, which
 # makes browsers refuse to execute module scripts — pin the web essentials.
@@ -57,6 +58,7 @@ WIDGET_HTML = """<!DOCTYPE html>
             --text-main: #F8FAFC;
             --text-muted: #94A3B8;
             --accent: #6366F1;
+            --cyan: #22D3EE;
             --green: #10B981;
             --red: #EF4444;
         }
@@ -73,7 +75,7 @@ WIDGET_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             padding-bottom: 8px;
             border-bottom: 1px solid var(--border);
         }
@@ -92,11 +94,22 @@ WIDGET_HTML = """<!DOCTYPE html>
             border-radius: 999px;
             border: 1px solid rgba(99, 102, 241, 0.3);
         }
+        .cli-bar {
+            background: rgba(34, 211, 238, 0.08);
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            border-radius: 8px;
+            padding: 7px 10px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+        }
         .profile-list {
             display: flex;
             flex-direction: column;
             gap: 8px;
-            max-height: 420px;
+            max-height: 400px;
             overflow-y: auto;
         }
         .profile-card {
@@ -107,6 +120,7 @@ WIDGET_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 8px;
             transition: all 0.2s ease;
         }
         .profile-card:hover {
@@ -136,9 +150,22 @@ WIDGET_HTML = """<!DOCTYPE html>
             font-size: 11px;
             color: var(--text-muted);
         }
+        .cli-pill {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 999px;
+            background: rgba(34, 211, 238, 0.15);
+            color: var(--cyan);
+            border: 1px solid rgba(34, 211, 238, 0.35);
+        }
+        .btn-group {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
         .btn {
             border: none;
-            padding: 5px 10px;
+            padding: 5px 9px;
             border-radius: 6px;
             font-size: 11px;
             font-weight: 600;
@@ -147,6 +174,7 @@ WIDGET_HTML = """<!DOCTYPE html>
         }
         .btn:hover { opacity: 0.85; }
         .btn-launch { background: var(--accent); color: white; }
+        .btn-cli { background: rgba(34, 211, 238, 0.14); color: #67E8F9; border: 1px solid rgba(34, 211, 238, 0.3); }
         .btn-stop { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.3); }
         .footer {
             margin-top: 14px;
@@ -173,27 +201,50 @@ WIDGET_HTML = """<!DOCTYPE html>
         <a class="link" href="/" target="_blank">🖥️ 打开矩阵控制台</a>
     </div>
 
+    <div class="cli-bar">
+        <span id="cli-status">agy CLI: 加载中...</span>
+        <div class="btn-group">
+            <button class="btn btn-cli" onclick="switchCLI('host')">Host CLI</button>
+            <button class="btn btn-cli" onclick="triggerSync()">同步</button>
+        </div>
+    </div>
+
     <div class="profile-list" id="profiles-container">
         <div style="text-align:center;padding:20px;color:var(--text-muted);">正在加载分身...</div>
     </div>
 
     <div class="footer">
         <span id="refresh-indicator">● 实时同步</span>
-        <span class="link" onclick="fetchProfiles()">刷新</span>
+        <span class="link" onclick="fetchAll()">刷新</span>
     </div>
 
     <script>
         const esc = s => String(s ?? '').replace(/[&<>"']/g,
             c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-        async function fetchProfiles() {
+        async function fetchAll() {
             try {
-                const res = await fetch('/api/profiles');
-                const data = await res.json();
+                const [profRes, cliRes] = await Promise.all([
+                    fetch('/api/profiles'),
+                    fetch('/api/cli')
+                ]);
+                const data = await profRes.json();
+                const cliData = await cliRes.json();
+                renderCLI(cliData);
                 renderProfiles(data);
             } catch (err) {
                 console.error(err);
             }
+        }
+
+        function renderCLI(cliData) {
+            const cur = cliData.current || {};
+            const sync = cliData.sync || {};
+            const el = document.getElementById('cli-status');
+            el.innerHTML = `agy CLI: <b style="color:#67E8F9;">${esc(cur.active_profile || 'host')}</b> (${esc(cur.account || '未登录')})`;
+            const ind = document.getElementById('refresh-indicator');
+            const counts = sync.shared_counts || {};
+            ind.textContent = `${sync.daemon_running ? '●' : '○'} 实时同步 (${counts.projects || 0}P/${counts.skills || 0}S)`;
         }
 
         function renderProfiles(profiles) {
@@ -213,13 +264,15 @@ WIDGET_HTML = """<!DOCTYPE html>
                             <span class="status-dot ${p.running ? 'running' : 'stopped'}"></span>
                             <span>${esc(p.name)}</span>
                             ${p.running ? `<span style="font-size:10px;color:#94A3B8;">(PID: ${esc(p.pid)})</span>` : ''}
+                            ${p.active_cli ? `<span class="cli-pill">★ agy CLI</span>` : ''}
                         </div>
                         <div class="profile-account">${esc(p.account || '(未绑定 Google 账号)')}</div>
                     </div>
-                    <div>
+                    <div class="btn-group">
+                        <button class="btn btn-cli" onclick="switchCLI('${esc(p.name)}')">切换CLI</button>
                         ${p.running
-                            ? `<button class="btn btn-stop" onclick="stopProfile('${p.name}')">停止</button>`
-                            : `<button class="btn btn-launch" onclick="launchProfile('${p.name}')">启动</button>`
+                            ? `<button class="btn btn-stop" onclick="stopProfile('${esc(p.name)}')">停止</button>`
+                            : `<button class="btn btn-launch" onclick="launchProfile('${esc(p.name)}')">启动</button>`
                         }
                     </div>
                 </div>
@@ -228,16 +281,30 @@ WIDGET_HTML = """<!DOCTYPE html>
 
         async function launchProfile(name) {
             await fetch(`/api/profiles/${encodeURIComponent(name)}/launch`, { method: 'POST' });
-            setTimeout(fetchProfiles, 500);
+            setTimeout(fetchAll, 500);
         }
 
         async function stopProfile(name) {
             await fetch(`/api/profiles/${encodeURIComponent(name)}/stop`, { method: 'POST' });
-            setTimeout(fetchProfiles, 500);
+            setTimeout(fetchAll, 500);
         }
 
-        fetchProfiles();
-        setInterval(fetchProfiles, 2500);
+        async function switchCLI(name) {
+            await fetch('/api/cli/use', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            setTimeout(fetchAll, 250);
+        }
+
+        async function triggerSync() {
+            await fetch('/api/sync', { method: 'POST' });
+            setTimeout(fetchAll, 250);
+        }
+
+        fetchAll();
+        setInterval(fetchAll, 2500);
     </script>
 </body>
 </html>
@@ -281,15 +348,33 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         h1 { font-size: 24px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .status-strip {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .status-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 13px;
+        }
         .banner {
             background: rgba(99, 102, 241, 0.08);
             border: 1px solid rgba(99, 102, 241, 0.2);
             border-radius: 8px;
             padding: 12px 16px;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
             font-size: 13px;
             display: flex;
             align-items: center;
@@ -338,8 +423,9 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 8px;
         }
-        .card-title { font-size: 16px; font-weight: 600; }
+        .card-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
         .status-badge {
             font-size: 11px;
             padding: 3px 8px;
@@ -348,8 +434,16 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
         }
         .status-running { background: rgba(16, 185, 129, 0.15); color: #10B981; }
         .status-stopped { background: rgba(100, 116, 139, 0.15); color: #64748B; }
+        .cli-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(6, 182, 212, 0.15);
+            color: #06B6D4;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+        }
         .card-account { font-size: 12px; color: var(--text-muted); }
-        .card-actions { display: flex; gap: 8px; }
+        .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
@@ -360,8 +454,19 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
         </div>
     </header>
 
+    <div class="status-strip">
+        <div class="status-group">
+            <div id="cli-binding">终端 <code>agy</code> CLI 绑定: 加载中...</div>
+            <div id="sync-engine" class="card-account">实时同步引擎: 检测中...</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="switchCLI('host')">切回本机 Host CLI</button>
+            <button class="btn btn-outline" onclick="triggerSync()">🔄 立即同步</button>
+        </div>
+    </div>
+
     <div class="banner">
-        <div>💡 <b>提示</b>：当前为纯标准库即开即用模式。在 <code>dashboard/</code> 目录执行 <code>npm run build</code> 可启用高级 React 多宫格矩阵。</div>
+        <div>💡 <b>提示</b>：Projects / Skills / Plugins / Hooks 与 <code>agy</code> CLI 均已支持跨分身与宿主机同步。</div>
         <a class="btn btn-outline" style="font-size:11px;padding:4px 8px;text-decoration:none;" href="https://github.com/edison-land/paragravity" target="_blank">GitHub</a>
     </div>
 
@@ -369,7 +474,7 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
         <button class="btn" onclick="batchLaunch()">🚀 一键启动全部</button>
         <button class="btn btn-outline" onclick="batchStop()">⏹ 一键停止全部</button>
         <button class="btn btn-outline" onclick="tileWindows()">🪟 智能平铺窗口 (macOS)</button>
-        <button class="btn btn-outline" onclick="fetchProfiles()">🔄 刷新列表</button>
+        <button class="btn btn-outline" onclick="fetchAll()">🔄 刷新列表</button>
     </div>
 
     <div class="grid" id="profile-grid">
@@ -380,14 +485,29 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
         const esc = s => String(s ?? '').replace(/[&<>"']/g,
             c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-        async function fetchProfiles() {
+        async function fetchAll() {
             try {
-                const res = await fetch('/api/profiles');
-                const data = await res.json();
+                const [profRes, cliRes] = await Promise.all([
+                    fetch('/api/profiles'),
+                    fetch('/api/cli')
+                ]);
+                const data = await profRes.json();
+                const cliData = await cliRes.json();
+                renderStatusStrip(cliData);
                 renderGrid(data);
             } catch (err) {
                 console.error(err);
             }
+        }
+
+        function renderStatusStrip(cliData) {
+            const cur = cliData.current || {};
+            const sync = cliData.sync || {};
+            const counts = sync.shared_counts || {};
+            document.getElementById('cli-binding').innerHTML =
+                `当前终端 <code>agy</code> CLI 绑定: <b>${esc(cur.active_profile || 'host')}</b> (${esc(cur.account || '未登录')})`;
+            document.getElementById('sync-engine').innerHTML =
+                `实时同步引擎: <b style="color:${sync.daemon_running ? '#10B981' : '#94A3B8'};">${sync.daemon_running ? '● 已连通' : '○ 未启动'}</b> (${counts.projects || 0} Projects / ${counts.skills || 0} Skills / ${counts.plugins || 0} Plugins)`;
         }
 
         function renderGrid(profiles) {
@@ -400,7 +520,10 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
                 <div class="card">
                     <div>
                         <div class="card-header">
-                            <span class="card-title">${esc(p.name)}</span>
+                            <span class="card-title">
+                                ${esc(p.name)}
+                                ${p.active_cli ? `<span class="cli-badge">★ agy CLI</span>` : ''}
+                            </span>
                             <span class="status-badge ${p.running ? 'status-running' : 'status-stopped'}">
                                 ${p.running ? `● 运行中 (${esc(p.pid)})` : '○ 已停止'}
                             </span>
@@ -410,10 +533,11 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
                     </div>
                     <div class="card-actions">
                         ${p.running
-                            ? `<button class="btn btn-outline" style="color:#EF4444;border-color:rgba(239,68,68,0.3);" onclick="stopProfile('${p.name}')">停止</button>`
-                            : `<button class="btn" onclick="launchProfile('${p.name}')">启动窗口</button>`
+                            ? `<button class="btn btn-outline" style="color:#EF4444;border-color:rgba(239,68,68,0.3);" onclick="stopProfile('${esc(p.name)}')">停止</button>`
+                            : `<button class="btn" onclick="launchProfile('${esc(p.name)}')">启动窗口</button>`
                         }
-                        <button class="btn btn-outline" onclick="deleteProfile('${p.name}')">删除</button>
+                        <button class="btn btn-outline" onclick="switchCLI('${esc(p.name)}')">切换 agy CLI</button>
+                        <button class="btn btn-outline" onclick="deleteProfile('${esc(p.name)}')">删除</button>
                     </div>
                 </div>
             `).join('');
@@ -421,28 +545,42 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
 
         async function launchProfile(name) {
             await fetch(`/api/profiles/${encodeURIComponent(name)}/launch`, { method: 'POST' });
-            setTimeout(fetchProfiles, 600);
+            setTimeout(fetchAll, 600);
         }
 
         async function stopProfile(name) {
             await fetch(`/api/profiles/${encodeURIComponent(name)}/stop`, { method: 'POST' });
-            setTimeout(fetchProfiles, 600);
+            setTimeout(fetchAll, 600);
         }
 
         async function deleteProfile(name) {
             if (!confirm(`确定要删除分身 '${name}' 吗？`)) return;
             await fetch(`/api/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
-            setTimeout(fetchProfiles, 600);
+            setTimeout(fetchAll, 600);
+        }
+
+        async function switchCLI(name) {
+            await fetch('/api/cli/use', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            setTimeout(fetchAll, 300);
+        }
+
+        async function triggerSync() {
+            await fetch('/api/sync', { method: 'POST' });
+            setTimeout(fetchAll, 300);
         }
 
         async function batchLaunch() {
             await fetch('/api/batch/launch', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names: []}) });
-            setTimeout(fetchProfiles, 800);
+            setTimeout(fetchAll, 800);
         }
 
         async function batchStop() {
             await fetch('/api/batch/stop', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({names: []}) });
-            setTimeout(fetchProfiles, 800);
+            setTimeout(fetchAll, 800);
         }
 
         async function tileWindows() {
@@ -451,8 +589,8 @@ STANDALONE_CONSOLE_HTML = """<!DOCTYPE html>
             if (!data.success && data.error) alert(data.error);
         }
 
-        fetchProfiles();
-        setInterval(fetchProfiles, 3000);
+        fetchAll();
+        setInterval(fetchAll, 3000);
     </script>
 </body>
 </html>
@@ -494,9 +632,12 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
         if path == "/api/profiles":
             self.handle_get_profiles()
             return
+        elif path == "/api/cli":
+            self.handle_get_cli()
+            return
         elif path == "/api/system":
             self.send_json({
-                "version": "1.2.0",
+                "version": "1.3.0",
                 "theme": "dawn-iris",
                 "themeName": "晨曦紫霞白 (Dawn Iris & Violet)",
                 "platform": sys.platform,
@@ -521,6 +662,14 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
 
         if path == "/api/profiles":
             self.handle_create_profile()
+            return
+
+        if path == "/api/cli/use":
+            self.handle_use_cli()
+            return
+
+        if path == "/api/sync":
+            self.handle_sync_now()
             return
 
         # POST /api/batch/launch
@@ -597,6 +746,45 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({"error": str(e)}, status=500)
 
+    def handle_get_cli(self):
+        try:
+            cur_res = subprocess.run([sys.executable, str(CLI_PATH), "current", "--json"], capture_output=True, text=True)
+            sync_res = subprocess.run([sys.executable, str(CLI_PATH), "sync", "status", "--json"], capture_output=True, text=True)
+            cur_data = json.loads(cur_res.stdout) if cur_res.returncode == 0 and cur_res.stdout.strip() else {}
+            sync_data = json.loads(sync_res.stdout) if sync_res.returncode == 0 and sync_res.stdout.strip() else {}
+            self.send_json({"current": cur_data, "sync": sync_data})
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=500)
+
+    def handle_use_cli(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            data = json.loads(body or "{}")
+            name = str(data.get("name", "")).strip()
+            if not name:
+                self.send_json({"error": "Profile name or 'host' is required"}, status=400)
+                return
+            res = subprocess.run([sys.executable, str(CLI_PATH), "use", name], capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
+            if res.returncode == 0:
+                self.send_json({"success": True, "active": name, "output": res.stdout})
+            else:
+                self.send_json({"error": res.stderr or res.stdout or "Failed to switch CLI profile"}, status=400)
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=500)
+
+    def handle_sync_now(self):
+        try:
+            res = subprocess.run([sys.executable, str(CLI_PATH), "sync", "now"], capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
+            if res.returncode == 0:
+                self.send_json({"success": True, "output": res.stdout})
+            else:
+                self.send_json({"error": res.stderr or res.stdout or "Failed to sync"}, status=400)
+        except Exception as e:
+            self.send_json({"error": str(e)}, status=500)
+
     def handle_create_profile(self):
         try:
             length = int(self.headers.get("Content-Length", 0))
@@ -617,6 +805,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
                 cmd.append("-l")
 
             res = subprocess.run(cmd, capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
             if res.returncode == 0:
                 self.send_json({"success": True, "output": res.stdout})
             else:
@@ -627,6 +816,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
     def handle_launch_profile(self, name: str):
         try:
             res = subprocess.run([sys.executable, str(CLI_PATH), "launch", name], capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
             if res.returncode == 0:
                 self.send_json({"success": True, "output": res.stdout})
             else:
@@ -637,6 +827,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
     def handle_stop_profile(self, name: str):
         try:
             res = subprocess.run([sys.executable, str(CLI_PATH), "stop", name, "--force"], capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
             if res.returncode == 0:
                 self.send_json({"success": True, "output": res.stdout})
             else:
@@ -647,6 +838,7 @@ class ParaGravityHandler(BaseHTTPRequestHandler):
     def handle_delete_profile(self, name: str):
         try:
             res = subprocess.run([sys.executable, str(CLI_PATH), "delete", name, "-f"], capture_output=True, text=True)
+            _profiles_cache["t"] = 0.0
             if res.returncode == 0:
                 self.send_json({"success": True, "output": res.stdout})
             else:
