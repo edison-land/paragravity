@@ -13,21 +13,88 @@ import os
 import re
 import sys
 import json
+import time
 import base64
+import hashlib
 import signal
 import shutil
 import argparse
 import subprocess
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
-VERSION = "1.2.0"
+if sys.platform != "win32":
+    import fcntl
+    import pwd
+else:
+    fcntl = None
+    pwd = None
+
+VERSION = "1.3.0"
 
 IS_WINDOWS = sys.platform == "win32"
 IS_DARWIN = sys.platform == "darwin"
 
+
+def _sys_passwd_home() -> Optional[Path]:
+    """Return the OS passwd home directory on POSIX systems, if available."""
+    if not IS_WINDOWS and pwd is not None:
+        try:
+            pw_dir = Path(pwd.getpwuid(os.getuid()).pw_dir)
+            if pw_dir.is_dir():
+                return pw_dir
+        except Exception:
+            pass
+    return None
+
+
+def get_real_home() -> Path:
+    """Resolve the real OS user home even inside a ParaGravity sandboxed terminal,
+    while respecting explicit test HOME overrides (when HOME is not inside a profile)."""
+    override = os.environ.get("PARAGRAVITY_REAL_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+
+    env_home = Path.home()
+    parts = env_home.parts
+    if len(parts) >= 3 and parts[-1] == "home" and parts[-3] == ".antigravity-profiles":
+        return Path(*parts[:-3])
+    if env_home.name == "home" and (env_home.parent / "profile.json").is_file():
+        return _sys_passwd_home() or env_home.parent.parent.parent
+    return env_home
+
+
+def is_ephemeral_test_home(real_home: Optional[Path] = None) -> bool:
+    """Return True when running inside an isolated test HOME/temp directory so
+    tests never touch the host's live launchd services."""
+    if os.environ.get("PARAGRAVITY_NO_DAEMON") == "1":
+        return True
+    if real_home is None:
+        real_home = get_real_home()
+    if not IS_WINDOWS:
+        pw = _sys_passwd_home()
+        if pw is not None:
+            try:
+                if real_home.resolve() != pw.resolve():
+                    return True
+            except OSError:
+                pass
+    import tempfile
+    try:
+        tmp_root = Path(tempfile.gettempdir()).resolve()
+        rh_res = real_home.resolve()
+        if rh_res == tmp_root or tmp_root in rh_res.parents:
+            return True
+    except OSError:
+        pass
+    if "pgrav-" in str(real_home).lower():
+        return True
+    return False
+
+
 def get_default_app_bin() -> str:
+    real_home = get_real_home()
     if IS_WINDOWS:
         local_app_data = os.environ.get("LOCALAPPDATA")
         program_files = os.environ.get("PROGRAMFILES")
@@ -51,7 +118,7 @@ def get_default_app_bin() -> str:
         mac_default = Path("/Applications/Antigravity.app/Contents/MacOS/Antigravity")
         if mac_default.is_file():
             return str(mac_default)
-        alt = Path.home() / "Applications/Antigravity.app/Contents/MacOS/Antigravity"
+        alt = real_home / "Applications/Antigravity.app/Contents/MacOS/Antigravity"
         if alt.is_file():
             return str(alt)
         return str(mac_default)
@@ -59,8 +126,9 @@ def get_default_app_bin() -> str:
         which_bin = shutil.which("antigravity") or shutil.which("Antigravity")
         return which_bin or "/usr/bin/antigravity"
 
+
 DEFAULT_APP_BIN = get_default_app_bin()
-DEFAULT_PROFILES_DIR = Path.home() / ".antigravity-profiles"
+DEFAULT_PROFILES_DIR = get_real_home() / ".antigravity-profiles"
 
 # ANSI Colors — disabled when output is piped or NO_COLOR is set, so
 # `pgrav list | cat`, `--json` consumers and CI logs stay clean.
@@ -78,7 +146,7 @@ def get_profiles_dir() -> Path:
     env_dir = os.environ.get("PARAGRAVITY_PROFILES_DIR") or os.environ.get("AGY_PROFILES_DIR")
     if env_dir:
         return Path(env_dir).expanduser()
-    return DEFAULT_PROFILES_DIR
+    return get_real_home() / ".antigravity-profiles"
 
 def validate_profile_name(name: str):
     """Reject names that could escape the profiles directory or be interpreted by a shell."""
@@ -106,10 +174,11 @@ def harden_profile_perms(profile_dir: Path, profiles_dir: Path):
             profile_dir / "home",
             profile_dir / "home" / ".gemini",
             profile_dir / "home" / ".gemini" / "config",
+            profile_dir / "home" / ".gemini" / "antigravity-cli",
             profile_dir / "data" / "User",
         ]
         for d in targets:
-            if d.is_dir():
+            if d.is_dir() and not d.is_symlink():
                 os.chmod(d, 0o700)
     except OSError:
         pass
@@ -144,10 +213,10 @@ def decode_jwt_payload(jwt_str: str) -> dict:
     """Decode JWT payload without external libraries."""
     try:
         parts = jwt_str.strip().split(".")
-        if len(parts) >= 2:
+        if len(parts) == 3 and re.fullmatch(r"[A-Za-z0-9_-]+", parts[1]):
             payload = parts[1]
             payload += "=" * (-len(payload) % 4)
-            return json.loads(base64.urlsafe_b64decode(payload.encode()).decode("utf-8"))
+            return json.loads(base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8"))
     except Exception:
         pass
     return {}
@@ -168,43 +237,255 @@ def token_expiry_state(token_exp: str):
         return "expiring"
     return None
 
+def _parse_oauth_token_file(token_file: Path) -> dict:
+    """Parse modern JSON or legacy JWT Antigravity/agy OAuth token files."""
+    res = {
+        "email": None,
+        "token_exp": None,
+        "access_token_exp": None,
+        "has_token": False,
+        "has_refresh_token": False,
+        "auth_method": None,
+        "mtime_ns": 0,
+    }
+    if not token_file.is_file():
+        return res
+    try:
+        st = token_file.stat()
+        res["mtime_ns"] = st.st_mtime_ns
+        tok_raw = token_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        return res
+    if not tok_raw:
+        return res
+
+    # Modern Antigravity 2.0 & agy CLI store JSON:
+    # {"token": {"access_token": ..., "refresh_token": ..., "expiry": ...}, "auth_method": ..., "id_token_email": ...}
+    data = None
+    try:
+        data = json.loads(tok_raw)
+    except Exception:
+        data = None
+
+    if isinstance(data, dict):
+        tok = data.get("token") if isinstance(data.get("token"), dict) else data
+        has_refresh = bool(tok.get("refresh_token") or data.get("refresh_token"))
+        has_access = bool(
+            tok.get("access_token")
+            or data.get("access_token")
+            or tok.get("id_token")
+            or data.get("id_token")
+        )
+        res["has_refresh_token"] = has_refresh
+        res["has_token"] = has_refresh or has_access
+        res["auth_method"] = data.get("auth_method")
+
+        email = data.get("id_token_email") or data.get("email") or tok.get("email")
+        if not email:
+            id_tok = tok.get("id_token") or data.get("id_token")
+            if id_tok:
+                email = decode_jwt_payload(str(id_tok)).get("email")
+        if email:
+            res["email"] = str(email).strip()
+
+        access_exp = tok.get("expiry") or data.get("expiry")
+        if access_exp:
+            res["access_token_exp"] = str(access_exp)
+        # OAuth2 refresh_token sessions auto-refresh on demand; do not trigger a false
+        # "token expired" warning when the 1-hour access_token expiry is in the past.
+        res["token_exp"] = None if has_refresh else res["access_token_exp"]
+        return res
+
+    # Legacy raw JWT string fallback
+    claims = decode_jwt_payload(tok_raw)
+    if claims:
+        res["has_token"] = True
+        if claims.get("email"):
+            res["email"] = str(claims["email"]).strip()
+        if claims.get("exp"):
+            try:
+                res["token_exp"] = datetime.fromtimestamp(claims["exp"]).isoformat()
+            except Exception:
+                pass
+    return res
+
 def extract_account_info(profile_dir: Path) -> dict:
     """Extract signed-in Google account information from profile data."""
     info = {
         "email": None,
         "token_exp": None,
-        "has_token": False
+        "has_token": False,
+        "has_refresh_token": False,
     }
     gemini_dir = profile_dir / "home" / ".gemini"
-    if not gemini_dir.exists():
-        return info
-
-    acc_file = gemini_dir / "google_accounts.json"
-    if acc_file.is_file():
-        try:
-            with open(acc_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                active = data.get("active")
-                if active:
-                    info["email"] = active
-        except Exception:
-            pass
-
-    token_file = gemini_dir / "jetski-standalone-oauth-token"
-    if token_file.is_file():
-        try:
-            tok_raw = token_file.read_text(encoding="utf-8").strip()
-            if tok_raw:
+    if gemini_dir.exists():
+        candidates = [
+            gemini_dir / "jetski-standalone-oauth-token",
+            gemini_dir / "antigravity-cli" / "antigravity-oauth-token",
+        ]
+        parsed_list = [_parse_oauth_token_file(c) for c in candidates if c.is_file()]
+        parsed_list.sort(key=lambda item: item.get("mtime_ns", 0), reverse=True)
+        for parsed in parsed_list:
+            if parsed["has_token"]:
                 info["has_token"] = True
-                claims = decode_jwt_payload(tok_raw)
-                if not info["email"] and claims.get("email"):
-                    info["email"] = claims["email"]
-                if claims.get("exp"):
-                    info["token_exp"] = datetime.fromtimestamp(claims["exp"]).isoformat()
-        except Exception:
-            pass
+            if parsed["has_refresh_token"]:
+                info["has_refresh_token"] = True
+            if not info["email"] and parsed["email"]:
+                info["email"] = parsed["email"]
+            if info["token_exp"] is None and parsed["token_exp"]:
+                info["token_exp"] = parsed["token_exp"]
+
+        if not info["email"]:
+            acc_file = gemini_dir / "google_accounts.json"
+            if acc_file.is_file():
+                try:
+                    data = json.loads(acc_file.read_text(encoding="utf-8"))
+                    active = data.get("active")
+                    if active:
+                        info["email"] = active
+                except Exception:
+                    pass
+
+    if not info["email"]:
+        app_storage = profile_dir / "data" / "app_storage.json"
+        if app_storage.is_file():
+            try:
+                sdata = json.loads(app_storage.read_text(encoding="utf-8"))
+                last_user = sdata.get("agy.onboarding.lastLoginUsername")
+                if last_user and isinstance(last_user, str) and "@" in last_user and info["has_token"]:
+                    info["email"] = last_user.strip()
+            except Exception:
+                pass
 
     return info
+
+def get_host_app_support_dir() -> Path:
+    real_home = get_real_home()
+    if IS_WINDOWS:
+        appdata = os.environ.get("APPDATA")
+        return (Path(appdata) / "Antigravity") if appdata else (real_home / "AppData" / "Roaming" / "Antigravity")
+    if IS_DARWIN:
+        base = real_home / "Library" / "Application Support"
+        for name in ("antigravity", "Antigravity"):
+            cand = base / name
+            if cand.is_dir():
+                return cand
+        return base / "antigravity"
+    return real_home / ".config" / "Antigravity"
+
+def get_host_process() -> int:
+    """Return PID of the main native host Antigravity process (without --user-data-dir)."""
+    if IS_WINDOWS:
+        try:
+            ps_cmd = (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.Name -like '*Antigravity*' -and $_.CommandLine -notlike '*--type=*' -and $_.CommandLine -notlike '*--user-data-dir=*' } | "
+                "Select-Object -ExpandProperty ProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+                stderr=subprocess.DEVNULL
+            )
+            pids = [int(p) for p in out.decode("utf-8", "replace").split() if p.strip().isdigit()]
+            return pids[0] if pids else 0
+        except Exception:
+            return 0
+    try:
+        out = subprocess.check_output(["ps", "-ax", "-o", "pid=,command="], stderr=subprocess.DEVNULL)
+        for line in out.decode("utf-8", "replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2 or not parts[0].isdigit():
+                continue
+            pid = int(parts[0])
+            cmd = parts[1]
+            if "--type=" in cmd or "--user-data-dir=" in cmd:
+                continue
+            if "Antigravity.app/Contents/MacOS/Antigravity" in cmd or (
+                not IS_DARWIN and os.path.basename(cmd.split()[0]).lower() == "antigravity"
+            ):
+                return pid
+    except Exception:
+        pass
+    return 0
+
+def extract_host_info() -> dict:
+    """Inspect real host Antigravity running status and signed-in account (metadata only, never secrets)."""
+    real_home = get_real_home()
+    gemini_dir = real_home / ".gemini"
+    app_support = get_host_app_support_dir()
+    pid = get_host_process()
+
+    email = None
+    has_token = False
+    token_exp = None
+
+    candidates = [
+        gemini_dir / "jetski-standalone-oauth-token",
+        gemini_dir / "antigravity-cli" / "antigravity-oauth-token",
+    ]
+    parsed_list = [_parse_oauth_token_file(c) for c in candidates if c.is_file()]
+    parsed_list.sort(key=lambda item: item.get("mtime_ns", 0), reverse=True)
+    for parsed in parsed_list:
+        if parsed["has_token"]:
+            has_token = True
+        if not email and parsed["email"]:
+            email = parsed["email"]
+        if token_exp is None and parsed["token_exp"]:
+            token_exp = parsed["token_exp"]
+
+    if IS_DARWIN and not has_token:
+        try:
+            res = subprocess.run(
+                ["security", "find-generic-password", "-s", "gemini", "-a", "antigravity"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            if res.returncode == 0:
+                has_token = True
+        except Exception:
+            pass
+
+    if not email:
+        acc_file = gemini_dir / "google_accounts.json"
+        if acc_file.is_file():
+            try:
+                data = json.loads(acc_file.read_text(encoding="utf-8"))
+                if data.get("active"):
+                    email = str(data["active"]).strip()
+            except Exception:
+                pass
+
+    if not email:
+        for app_dir in (
+            app_support,
+            real_home / "Library" / "Application Support" / "antigravity",
+            real_home / "Library" / "Application Support" / "Antigravity",
+        ):
+            app_storage = app_dir / "app_storage.json"
+            if app_storage.is_file():
+                try:
+                    sdata = json.loads(app_storage.read_text(encoding="utf-8"))
+                    last_user = sdata.get("agy.onboarding.lastLoginUsername")
+                    if last_user and isinstance(last_user, str) and "@" in last_user:
+                        email = last_user.strip()
+                        break
+                except Exception:
+                    pass
+
+    return {
+        "name": "host",
+        "running": bool(pid),
+        "pid": pid or None,
+        "account": email,
+        "has_token": has_token,
+        "token_exp": token_exp,
+        "token_state": token_expiry_state(token_exp),
+        "directory": str(gemini_dir),
+    }
 
 def strip_ansi(text: str) -> str:
     return re.sub(r'\x1b\[[0-9;]*m', '', text)
@@ -330,9 +611,13 @@ def get_profile_process(profile_name: Path, data_dir: Path) -> int:
 
 def get_canonical_cli_path() -> Path:
     """Find the canonical executable path for paragravity CLI."""
-    user_installed = Path.home() / ".paragravity" / "bin" / "paragravity"
-    if user_installed.is_file() and os.access(user_installed, os.X_OK):
-        return user_installed
+    real_home = get_real_home()
+    for cand in (
+        real_home / ".local" / "bin" / "paragravity",
+        real_home / ".paragravity" / "bin" / "paragravity",
+    ):
+        if cand.is_file() and os.access(cand, os.X_OK):
+            return cand.resolve()
     which_pgrav = shutil.which("paragravity") or shutil.which("pgrav")
     if which_pgrav:
         try:
@@ -355,7 +640,7 @@ def get_installed_app_version(app_bin: Optional[str] = None) -> Optional[str]:
         plist_candidates = [
             bin_path.parent.parent / "Info.plist",
             Path("/Applications/Antigravity.app/Contents/Info.plist"),
-            Path.home() / "Applications/Antigravity.app/Contents/Info.plist",
+            get_real_home() / "Applications/Antigravity.app/Contents/Info.plist",
         ]
         import plistlib
         for plist_path in plist_candidates:
@@ -553,14 +838,18 @@ LINK_ITEMS_FULL = [
     ".zshrc", ".zshenv", ".zprofile",
     ".bashrc", ".bash_profile", ".profile",
     ".gitconfig", ".gitignore_global",
-    ".ssh",
-    ".config",
+    ".ssh", ".config",
     ".npmrc", ".yarnrc",
-    "Desktop", "Documents", "Downloads", "Projects", "Developer",
+    ".agents", ".agent",
+    ".orca", "orca",
+    ".local", ".nvm", ".npm", ".bun", ".cargo", ".rustup",
+    ".opencode", ".minimax",
+    ".claude", ".codex", ".omp", ".dsh", ".paseo", ".t3", ".lark-cli", ".hindsight",
+    "Desktop", "Documents", "Downloads", "Projects", "Developer", "work", "reports",
 ]
 LINK_ITEMS_MINIMAL = [
     i for i in LINK_ITEMS_FULL
-    if i not in (".ssh", ".config", ".npmrc", ".yarnrc")
+    if i not in (".ssh", ".config", ".npmrc", ".yarnrc", ".claude", ".codex", ".opencode", ".minimax", ".lark-cli", ".dsh")
 ]
 SYMLINK_POLICIES = {
     "full": LINK_ITEMS_FULL,
@@ -612,7 +901,7 @@ def setup_home_symlinks(real_home: Path, profile_home: Path, policy: str = "full
     for item in link_items:
         src = real_home / item
         dst = profile_home / item
-        if src.exists() and not dst.exists():
+        if src.exists() and not dst.exists() and not dst.is_symlink():
             create_symlink_or_junction(src, dst)
 
     if IS_DARWIN:
@@ -620,11 +909,35 @@ def setup_home_symlinks(real_home: Path, profile_home: Path, policy: str = "full
         prof_lib = profile_home / "Library"
         prof_lib.mkdir(exist_ok=True)
         prof_kc = prof_lib / "Keychains"
-        if real_kc.exists() and not prof_kc.exists():
+        if real_kc.exists() and not prof_kc.exists() and not prof_kc.is_symlink():
             try:
                 prof_kc.symlink_to(real_kc)
             except Exception:
                 pass
+
+def sanitize_mcp_servers(servers) -> dict:
+    """Strip secret-looking values from an mcpServers mapping.
+
+    MCP server definitions routinely embed API keys/tokens in `env` and
+    `headers` — the "credentials are never copied" guarantee has to reach
+    into these, or --inherit-config would leak keys into every clone.
+    """
+    secret_key = re.compile(r"key|token|secret|password|credential|auth|signature|private", re.IGNORECASE)
+    if not isinstance(servers, dict):
+        return servers
+    clean = {}
+    for srv_name, srv in servers.items():
+        if isinstance(srv, dict):
+            srv = dict(srv)
+            for field in ("env", "headers"):
+                if isinstance(srv.get(field), dict):
+                    srv[field] = {
+                        k: ("" if secret_key.search(str(k)) else v)
+                        for k, v in srv[field].items()
+                    }
+        clean[srv_name] = srv
+    return clean
+
 
 def setup_profile_inheritance(
     target_profile_dir: Path,
@@ -640,7 +953,7 @@ def setup_profile_inheritance(
     Returns a dict summarizing what was inherited.
     """
     profiles_dir = get_profiles_dir()
-    real_home = Path.home()
+    real_home = get_real_home()
 
     if source == "host":
         src_root = real_home
@@ -784,29 +1097,6 @@ def setup_profile_inheritance(
         _safe_copy(src_user_dir / "keybindings.json", tgt_user_dir / "keybindings.json")
         _safe_copy_dir(src_user_dir / "snippets", tgt_user_dir / "snippets")
 
-    def _sanitize_mcp_servers(servers) -> dict:
-        """Strip secret-looking values from an mcpServers mapping.
-
-        MCP server definitions routinely embed API keys/tokens in `env` and
-        `headers` — the "credentials are never copied" guarantee has to reach
-        into these, or --inherit-config would leak keys into every clone.
-        """
-        secret_key = re.compile(r"key|token|secret|password|credential|auth|signature|private", re.IGNORECASE)
-        if not isinstance(servers, dict):
-            return servers
-        clean = {}
-        for srv_name, srv in servers.items():
-            if isinstance(srv, dict):
-                srv = dict(srv)
-                for field in ("env", "headers"):
-                    if isinstance(srv.get(field), dict):
-                        srv[field] = {
-                            k: ("" if secret_key.search(str(k)) else v)
-                            for k, v in srv[field].items()
-                        }
-            clean[srv_name] = srv
-        return clean
-
     # Target ~/.gemini/settings.json
     src_gemini_settings = src_gemini / "settings.json"
     if src_gemini_settings.is_file() and not src_gemini_settings.is_symlink():
@@ -825,7 +1115,7 @@ def setup_profile_inheritance(
                 if k == "mcpServers":
                     if not inherit_mcp:
                         continue
-                    v = _sanitize_mcp_servers(v)
+                    v = sanitize_mcp_servers(v)
                 filtered[k] = v
             dst_s = tgt_gemini / "settings.json"
             dst_s.write_text(json.dumps(filtered, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -852,14 +1142,14 @@ def setup_profile_inheritance(
             pass
 
     # 3. MCP tool configurations (mcp_config.json) — copied with secret env
-    # values stripped (see _sanitize_mcp_servers above).
+    # values stripped (see sanitize_mcp_servers above).
     if inherit_mcp:
         src_mcp = src_gemini / "config" / "mcp_config.json"
         if src_mcp.is_file() and not src_mcp.is_symlink():
             try:
                 mcp_raw = json.loads(src_mcp.read_text(encoding="utf-8"))
                 if isinstance(mcp_raw, dict) and "mcpServers" in mcp_raw:
-                    mcp_raw["mcpServers"] = _sanitize_mcp_servers(mcp_raw["mcpServers"])
+                    mcp_raw["mcpServers"] = sanitize_mcp_servers(mcp_raw["mcpServers"])
                 dst_mcp = tgt_gemini_cfg / "mcp_config.json"
                 dst_mcp.write_text(json.dumps(mcp_raw, indent=2, ensure_ascii=False), encoding="utf-8")
                 os.chmod(dst_mcp, 0o600)
@@ -889,7 +1179,7 @@ def create_macos_app_shortcut(profile_name: str) -> Path:
     """Create a macOS native .app in ~/Applications so Spotlight and Dock can launch it."""
     if not IS_DARWIN:
         return None
-    apps_dir = Path.home() / "Applications"
+    apps_dir = get_real_home() / "Applications"
     apps_dir.mkdir(exist_ok=True)
 
     display_name = f"Antigravity ({profile_name})"
@@ -926,7 +1216,7 @@ def remove_macos_app_shortcut(profile_name: str):
     """Remove macOS .app shortcut for profile."""
     if not IS_DARWIN:
         return
-    apps_dir = Path.home() / "Applications"
+    apps_dir = get_real_home() / "Applications"
     if not apps_dir.exists():
         return
     # Exact names only — a glob like "Antigravity (zwe)*.app" would also match
@@ -944,7 +1234,7 @@ def create_windows_shortcut(profile_name: str) -> Path | None:
         start_menu_dirs = []
         if appdata:
             start_menu_dirs.append(Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs")
-        desktop_dir = Path.home() / "Desktop"
+        desktop_dir = get_real_home() / "Desktop"
 
         shortcut_name = f"Antigravity ({profile_name}).lnk"
         script_path = Path(__file__).resolve()
@@ -991,7 +1281,7 @@ def remove_windows_shortcut(profile_name: str):
     try:
         appdata = os.environ.get("APPDATA")
         shortcut_name = f"Antigravity ({profile_name}).lnk"
-        candidates = [Path.home() / "Desktop" / shortcut_name]
+        candidates = [get_real_home() / "Desktop" / shortcut_name]
         if appdata:
             candidates.append(Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / shortcut_name)
         for c in candidates:
@@ -1013,10 +1303,1424 @@ def remove_desktop_shortcut(profile_name: str):
     elif IS_WINDOWS:
         remove_windows_shortcut(profile_name)
 
+FAKE_SSH_CONN = "127.0.0.1 50000 127.0.0.1 22"
+FAKE_SSH_CLIENT = "127.0.0.1 50000 22"
+
+SHARED_GEMINI_CONFIG_DIRS = [
+    "projects",
+    "skills",
+    "plugins",
+    "hooks",
+    "rules",
+    "agents",
+    "workflows",
+    "global_workflows",
+    "sidecars",
+]
+
+SYNC_AGENT_LABEL = "com.paragravity.sync"
+
+
+def _write_bytes_atomic(dst: Path, content: bytes, mode: int = 0o600):
+    """Write bytes atomically via temp file + os.replace (never follows symlinks)."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if not IS_WINDOWS:
+        try:
+            os.chmod(dst.parent, 0o700)
+        except OSError:
+            pass
+    tmp = dst.with_name(f".{dst.name}.tmp.{os.getpid()}")
+    tmp.write_bytes(content)
+    if not IS_WINDOWS:
+        try:
+            os.chmod(tmp, mode)
+        except OSError:
+            pass
+    os.replace(tmp, dst)
+
+
+def _write_text_atomic(dst: Path, text: str, mode: int = 0o600):
+    _write_bytes_atomic(dst, text.encode("utf-8"), mode=mode)
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_json(obj) -> str:
+    canonical = json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def sync_profile_auth_tokens(profile_dir: Path) -> bool:
+    """Bridge per-profile Desktop and agy CLI OAuth tokens (same profile only)."""
+    gemini_dir = profile_dir / "home" / ".gemini"
+    gui_tok = gemini_dir / "jetski-standalone-oauth-token"
+    cli_tok = gemini_dir / "antigravity-cli" / "antigravity-oauth-token"
+
+    gui_info = _parse_oauth_token_file(gui_tok)
+    cli_info = _parse_oauth_token_file(cli_tok)
+
+    gui_valid = bool(gui_info.get("has_token"))
+    cli_valid = bool(cli_info.get("has_token"))
+
+    if not gui_valid and not cli_valid:
+        return False
+
+    if gui_valid and cli_valid:
+        try:
+            gui_bytes = gui_tok.read_bytes()
+            cli_bytes = cli_tok.read_bytes()
+            if gui_bytes == cli_bytes:
+                return False
+        except OSError:
+            return False
+        if cli_info["mtime_ns"] > gui_info["mtime_ns"]:
+            src, dst = cli_tok, gui_tok
+            src_bytes = cli_bytes
+        else:
+            src, dst = gui_tok, cli_tok
+            src_bytes = gui_bytes
+    elif gui_valid:
+        src, dst = gui_tok, cli_tok
+        try:
+            src_bytes = src.read_bytes()
+        except OSError:
+            return False
+    else:
+        src, dst = cli_tok, gui_tok
+        try:
+            src_bytes = src.read_bytes()
+        except OSError:
+            return False
+
+    try:
+        src_st = src.stat()
+        _write_bytes_atomic(dst, src_bytes, mode=0o600)
+        os.utime(dst, ns=(src_st.st_atime_ns, src_st.st_mtime_ns))
+        return True
+    except OSError:
+        return False
+
+
+def _canonical_dir_has_swarm_board(projects_dir: Path) -> bool:
+    if not projects_dir.is_dir():
+        return False
+    for p in projects_dir.glob("*.json"):
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(obj, dict) and obj.get("name") == "swarm/swarm_board":
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _find_canonical_swarm_project_id(real_home: Path) -> Optional[str]:
+    proj_dir = real_home / ".gemini" / "config" / "projects"
+    if not proj_dir.is_dir():
+        return None
+    for p in sorted(proj_dir.glob("*.json")):
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(obj, dict) and obj.get("name") == "swarm/swarm_board" and obj.get("id"):
+                return str(obj["id"])
+        except Exception:
+            pass
+    return None
+
+
+def _merge_entry_into_dir(src_entry: Path, dst_entry: Path):
+    """Losslessly merge a file, symlink, or subdirectory from src_entry into dst_entry."""
+    if src_entry.is_symlink():
+        if not os.path.lexists(str(dst_entry)):
+            dst_entry.parent.mkdir(parents=True, exist_ok=True)
+            dst_entry.symlink_to(os.readlink(src_entry))
+        return
+    if src_entry.is_dir():
+        if not os.path.lexists(str(dst_entry)):
+            shutil.copytree(src_entry, dst_entry, symlinks=True)
+        elif dst_entry.is_dir() and not dst_entry.is_symlink():
+            for child in src_entry.iterdir():
+                _merge_entry_into_dir(child, dst_entry / child.name)
+        return
+    if src_entry.is_file():
+        if not os.path.lexists(str(dst_entry)):
+            dst_entry.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_entry, dst_entry)
+        elif dst_entry.is_file() and not dst_entry.is_symlink():
+            try:
+                if src_entry.stat().st_mtime_ns > dst_entry.stat().st_mtime_ns:
+                    shutil.copy2(src_entry, dst_entry)
+            except OSError:
+                pass
+
+
+def _is_dir_link_or_junction(p: Path) -> bool:
+    if p.is_symlink():
+        return True
+    if IS_WINDOWS:
+        if hasattr(os.path, "isjunction") and os.path.isjunction(p):
+            return True
+        try:
+            import stat as _stat
+            return bool(os.lstat(p).st_file_attributes & _stat.FILE_ATTRIBUTE_REPARSE_POINT)
+        except OSError:
+            return False
+    return False
+
+
+def _remove_dir_link_or_junction(p: Path):
+    if IS_WINDOWS:
+        try:
+            os.rmdir(p)
+            return
+        except OSError:
+            pass
+    p.unlink(missing_ok=True)
+
+
+def _merge_and_link_dir(canonical_dir: Path, prof_dir: Path, deduplicate_swarm_projects: bool = False) -> bool:
+    """Ensure prof_dir is a symlink/junction to canonical_dir after merging any local contents."""
+    canonical_dir.mkdir(parents=True, exist_ok=True)
+
+    if _is_dir_link_or_junction(prof_dir):
+        try:
+            if prof_dir.resolve() == canonical_dir.resolve():
+                return False
+        except OSError:
+            pass
+        _remove_dir_link_or_junction(prof_dir)
+    elif prof_dir.is_dir():
+        has_swarm = _canonical_dir_has_swarm_board(canonical_dir) if deduplicate_swarm_projects else False
+        for entry in list(prof_dir.iterdir()):
+            if deduplicate_swarm_projects and entry.is_file() and entry.suffix == ".json":
+                try:
+                    obj = json.loads(entry.read_text(encoding="utf-8"))
+                    if isinstance(obj, dict) and obj.get("name") == "swarm/swarm_board":
+                        if has_swarm:
+                            continue
+                        has_swarm = True
+                except Exception:
+                    pass
+            _merge_entry_into_dir(entry, canonical_dir / entry.name)
+        shutil.rmtree(prof_dir)
+    elif prof_dir.exists():
+        prof_dir.unlink(missing_ok=True)
+
+    return create_symlink_or_junction(canonical_dir, prof_dir)
+
+
+def setup_shared_config_links(profile_dir: Path, real_home: Optional[Path] = None) -> list[str]:
+    """Tier 1: symlink multi-file customization directories to host's canonical ~/.gemini/config."""
+    if real_home is None:
+        real_home = get_real_home()
+    host_gemini = real_home / ".gemini"
+    host_cfg = host_gemini / "config"
+    prof_gemini = profile_dir / "home" / ".gemini"
+    prof_cfg = prof_gemini / "config"
+    host_cfg.mkdir(parents=True, exist_ok=True)
+    prof_cfg.mkdir(parents=True, exist_ok=True)
+
+    linked = []
+    for sub in SHARED_GEMINI_CONFIG_DIRS:
+        canon = host_cfg / sub
+        target = prof_cfg / sub
+        if _merge_and_link_dir(canon, target, deduplicate_swarm_projects=(sub == "projects")):
+            linked.append(f"config/{sub}")
+
+    # Custom slash commands (~/.gemini/commands)
+    if (host_gemini / "commands").is_dir() or (prof_gemini / "commands").is_dir():
+        if _merge_and_link_dir(host_gemini / "commands", prof_gemini / "commands"):
+            linked.append("commands")
+
+    return linked
+
+
+def _load_sync_state(profiles_dir: Path) -> dict:
+    state_file = profiles_dir / ".sync_state.json"
+    if state_file.is_file():
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("files"), dict):
+                return data
+        except Exception:
+            pass
+    return {"version": 1, "files": {}}
+
+
+def _save_sync_state(profiles_dir: Path, state: dict):
+    state_file = profiles_dir / ".sync_state.json"
+    _write_text_atomic(state_file, json.dumps(state, indent=2, ensure_ascii=False) + "\n", mode=0o600)
+
+
+def _extract_shared_config_json(raw: dict, swarm_proj_id: Optional[str]) -> dict:
+    plugins = raw.get("plugins") if isinstance(raw.get("plugins"), dict) else {}
+    sidecars = raw.get("sidecars") if isinstance(raw.get("sidecars"), dict) else {}
+    sidecars_clean = json.loads(json.dumps(sidecars))
+    if swarm_proj_id and isinstance(sidecars_clean.get("swarm/swarm_board"), dict):
+        sidecars_clean["swarm/swarm_board"]["projectId"] = swarm_proj_id
+    us = raw.get("userSettings") if isinstance(raw.get("userSettings"), dict) else {}
+    us_clean = {k: v for k, v in us.items() if k not in ("remoteControlHostname", "remoteControlEnabled")}
+    return {
+        "plugins": plugins,
+        "sidecars": sidecars_clean,
+        "userSettings": us_clean,
+    }
+
+
+def _build_participant_config_json(shared: dict, existing_raw: dict) -> dict:
+    out = {}
+    if shared.get("plugins"):
+        out["plugins"] = shared["plugins"]
+    if shared.get("sidecars"):
+        out["sidecars"] = shared["sidecars"]
+    us = dict(shared.get("userSettings") or {})
+    existing_us = existing_raw.get("userSettings") if isinstance(existing_raw.get("userSettings"), dict) else {}
+    for local_key in ("remoteControlHostname", "remoteControlEnabled"):
+        if local_key in existing_us:
+            us[local_key] = existing_us[local_key]
+        else:
+            us.pop(local_key, None)
+    out["userSettings"] = us
+    return out
+
+
+def _sync_field_aware_json(
+    key: str,
+    participants: list[tuple[str, Path]],
+    extract_fn,
+    build_fn,
+    bootstrap_merge_fn,
+    state_files: dict,
+    skip_if_empty_all: bool = False,
+) -> tuple[bool, bool]:
+    """Bidirectional field-aware JSON sync across participants. Returns (changed_files, state_dirty)."""
+    prev_entry = state_files.get(key) if isinstance(state_files.get(key), dict) else {}
+    prev_canon_hash = prev_entry.get("canonical_hash")
+    prev_parts = prev_entry.get("participants") if isinstance(prev_entry.get("participants"), dict) else {}
+
+    records = []
+    for pid, path in participants:
+        rec = {
+            "id": pid,
+            "path": path,
+            "exists": path.is_file() and not path.is_symlink(),
+            "mtime_ns": 0,
+            "raw": {},
+            "raw_hash": None,
+            "shared": None,
+            "shared_hash": None,
+            "valid": False,
+        }
+        if path.is_symlink():
+            # Never follow a leftover symlink on single JSON files; treat as needing rewrite if real file exists elsewhere
+            rec["exists"] = False
+        if rec["exists"]:
+            try:
+                rec["mtime_ns"] = path.stat().st_mtime_ns
+                raw_bytes = path.read_bytes()
+                rec["raw_hash"] = _sha256_bytes(raw_bytes)
+                txt = raw_bytes.decode("utf-8").strip()
+                if not txt:
+                    rec["raw"] = {}
+                    rec["shared"] = extract_fn({})
+                    rec["shared_hash"] = _sha256_json(rec["shared"])
+                    rec["valid"] = True
+                else:
+                    raw = json.loads(txt)
+                    if isinstance(raw, dict):
+                        rec["raw"] = raw
+                        rec["shared"] = extract_fn(raw)
+                        rec["shared_hash"] = _sha256_json(rec["shared"])
+                        rec["valid"] = True
+            except Exception:
+                pass
+        records.append(rec)
+
+    valid_recs = [r for r in records if r["valid"]]
+    if not valid_recs:
+        return False, False
+
+    if skip_if_empty_all and all(not r["shared"] or all(not v for v in r["shared"].values()) for r in valid_recs):
+        return False, False
+
+    canonical_shared = None
+    if not prev_canon_hash:
+        canonical_shared = bootstrap_merge_fn(valid_recs)
+    else:
+        edited = []
+        for r in valid_recs:
+            pinfo = prev_parts.get(r["id"])
+            if not isinstance(pinfo, dict):
+                continue
+            prev_disk = pinfo.get("disk_hash")
+            disk_changed = (prev_disk is None) or (r["raw_hash"] != prev_disk)
+            if pinfo.get("hash") == prev_canon_hash and disk_changed and r["shared_hash"] != prev_canon_hash:
+                edited.append(r)
+        if edited:
+            winner = max(edited, key=lambda r: r["mtime_ns"])
+            canonical_shared = winner["shared"]
+        else:
+            matching = [r for r in valid_recs if r["shared_hash"] == prev_canon_hash]
+            if matching:
+                canonical_shared = matching[0]["shared"]
+            else:
+                # Fallback if all tracked copies drifted simultaneously
+                host_recs = [r for r in valid_recs if r["id"] == "host"]
+                winner = host_recs[0] if host_recs else max(valid_recs, key=lambda r: r["mtime_ns"])
+                canonical_shared = winner["shared"]
+
+    canon_hash = _sha256_json(canonical_shared)
+    changed_files = False
+    new_parts = {}
+
+    for r in records:
+        pid = r["id"]
+        path = r["path"]
+        target_obj = build_fn(pid, canonical_shared, r["raw"])
+        if skip_if_empty_all and not target_obj:
+            continue
+        target_bytes = (json.dumps(target_obj, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+        need_write = False
+        if not r["exists"]:
+            need_write = True
+        else:
+            try:
+                cur_bytes = path.read_bytes()
+                if cur_bytes != target_bytes:
+                    need_write = True
+            except OSError:
+                need_write = True
+
+        if need_write:
+            try:
+                _write_bytes_atomic(path, target_bytes, mode=0o600)
+                changed_files = True
+            except OSError:
+                pass
+
+        try:
+            st_ns = path.stat().st_mtime_ns if path.is_file() else 0
+            disk_hash = _sha256_bytes(path.read_bytes()) if path.is_file() else None
+        except OSError:
+            st_ns = 0
+            disk_hash = None
+        new_parts[pid] = {"mtime_ns": st_ns, "hash": canon_hash, "disk_hash": disk_hash}
+
+    new_entry = {"canonical_hash": canon_hash, "participants": new_parts}
+    state_dirty = (prev_entry != new_entry)
+    state_files[key] = new_entry
+    return changed_files, state_dirty
+
+
+def _sync_raw_file(
+    key: str,
+    participants: list[tuple[str, Path]],
+    state_files: dict,
+    require_valid_json: bool = False,
+) -> tuple[bool, bool]:
+    """Bidirectional raw-bytes sync for shared config/markdown/settings files."""
+    prev_entry = state_files.get(key) if isinstance(state_files.get(key), dict) else {}
+    prev_canon_hash = prev_entry.get("canonical_hash")
+    prev_parts = prev_entry.get("participants") if isinstance(prev_entry.get("participants"), dict) else {}
+
+    records = []
+    for pid, path in participants:
+        rec = {
+            "id": pid,
+            "path": path,
+            "exists": path.is_file() and not path.is_symlink(),
+            "mtime_ns": 0,
+            "bytes": None,
+            "hash": None,
+            "valid": False,
+        }
+        if rec["exists"]:
+            try:
+                rec["mtime_ns"] = path.stat().st_mtime_ns
+                raw_bytes = path.read_bytes()
+                if raw_bytes.strip():
+                    if require_valid_json:
+                        json.loads(raw_bytes.decode("utf-8"))
+                    rec["bytes"] = raw_bytes
+                    rec["hash"] = _sha256_bytes(raw_bytes)
+                    rec["valid"] = True
+            except Exception:
+                pass
+        records.append(rec)
+
+    valid_recs = [r for r in records if r["valid"]]
+    if not valid_recs:
+        return False, False
+
+    if not prev_canon_hash:
+        host_recs = [r for r in valid_recs if r["id"] == "host"]
+        winner = host_recs[0] if host_recs else max(valid_recs, key=lambda r: r["mtime_ns"])
+    else:
+        edited = [
+            r for r in valid_recs
+            if r["id"] in prev_parts
+            and prev_parts[r["id"]].get("hash") == prev_canon_hash
+            and r["hash"] != prev_canon_hash
+        ]
+        if edited:
+            winner = max(edited, key=lambda r: r["mtime_ns"])
+        else:
+            matching = [r for r in valid_recs if r["hash"] == prev_canon_hash]
+            if matching:
+                winner = matching[0]
+            else:
+                host_recs = [r for r in valid_recs if r["id"] == "host"]
+                winner = host_recs[0] if host_recs else max(valid_recs, key=lambda r: r["mtime_ns"])
+
+    canon_bytes = winner["bytes"]
+    canon_hash = winner["hash"]
+    changed_files = False
+    new_parts = {}
+
+    for r in records:
+        pid = r["id"]
+        path = r["path"]
+        if not r["exists"] or r["bytes"] != canon_bytes:
+            try:
+                _write_bytes_atomic(path, canon_bytes, mode=0o600)
+                changed_files = True
+            except OSError:
+                pass
+        try:
+            st_ns = path.stat().st_mtime_ns if path.is_file() else 0
+        except OSError:
+            st_ns = 0
+        new_parts[pid] = {"mtime_ns": st_ns, "hash": canon_hash}
+
+    new_entry = {"canonical_hash": canon_hash, "participants": new_parts}
+    state_dirty = (prev_entry != new_entry)
+    state_files[key] = new_entry
+    return changed_files, state_dirty
+
+
+def reconcile_shared_files(profiles: list[Path], profiles_dir: Path, real_home: Optional[Path] = None) -> dict:
+    """Tier 2: bidirectional field-aware sync for single JSON/markdown config files."""
+    if real_home is None:
+        real_home = get_real_home()
+    state = _load_sync_state(profiles_dir)
+    state_files = state.setdefault("files", {})
+    state_dirty = False
+    synced_keys = []
+
+    host_gemini = real_home / ".gemini"
+    host_app_user = get_host_app_support_dir() / "User"
+    swarm_proj_id = _find_canonical_swarm_project_id(real_home)
+
+    profile_meta_map = {}
+    for pdir in profiles:
+        pmeta = {}
+        mf = pdir / "profile.json"
+        if mf.is_file():
+            try:
+                pmeta = json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        profile_meta_map[pdir.name] = pmeta
+
+    def _participants(rel_home_subpath: Optional[Path], use_app_user: Optional[str] = None, exclude_no_mcp: bool = False) -> list[tuple[str, Path]]:
+        items = []
+        if use_app_user:
+            items.append(("host", host_app_user / use_app_user))
+            for pdir in profiles:
+                items.append((pdir.name, pdir / "data" / "User" / use_app_user))
+        else:
+            items.append(("host", host_gemini / rel_home_subpath))
+            for pdir in profiles:
+                if exclude_no_mcp and profile_meta_map.get(pdir.name, {}).get("no_mcp"):
+                    continue
+                items.append((pdir.name, pdir / "home" / ".gemini" / rel_home_subpath))
+        return items
+
+    # 1. config/config.json (plugins, sidecars, shared userSettings; keeps remoteControlHostname/Enabled local)
+    def _bootstrap_config_json(valid_recs: list[dict]) -> dict:
+        host_r = next((r for r in valid_recs if r["id"] == "host"), None)
+        base = json.loads(json.dumps(host_r["shared"] if host_r else valid_recs[0]["shared"]))
+        merged_plugins = dict(base.get("plugins") or {})
+        merged_sidecars = dict(base.get("sidecars") or {})
+        merged_us = dict(base.get("userSettings") or {})
+
+        for r in valid_recs:
+            sh = r["shared"] or {}
+            for k, v in (sh.get("plugins") or {}).items():
+                if k not in merged_plugins:
+                    merged_plugins[k] = v
+                elif isinstance(v, dict) and isinstance(merged_plugins[k], dict):
+                    if "installedFrom" in v and "installedFrom" not in merged_plugins[k]:
+                        merged_plugins[k] = v
+            for k, v in (sh.get("sidecars") or {}).items():
+                if k not in merged_sidecars:
+                    merged_sidecars[k] = v
+            for k, v in (sh.get("userSettings") or {}).items():
+                if k not in merged_us:
+                    merged_us[k] = v
+
+        if swarm_proj_id and isinstance(merged_sidecars.get("swarm/swarm_board"), dict):
+            merged_sidecars["swarm/swarm_board"]["projectId"] = swarm_proj_id
+
+        return {
+            "plugins": merged_plugins,
+            "sidecars": merged_sidecars,
+            "userSettings": merged_us,
+        }
+
+    ch, sd = _sync_field_aware_json(
+        "gemini_config_json",
+        _participants(Path("config") / "config.json"),
+        lambda raw: _extract_shared_config_json(raw, swarm_proj_id),
+        lambda _pid, shared, existing: _build_participant_config_json(shared, existing),
+        _bootstrap_config_json,
+        state_files,
+    )
+    if ch:
+        synced_keys.append("config/config.json")
+    state_dirty = state_dirty or sd
+
+    # 2. config/mcp_config.json (union-merge on bootstrap if non-empty, respects --no-mcp and sanitize_mcp)
+    def _extract_mcp(raw: dict) -> dict:
+        srvs = raw.get("mcpServers")
+        if isinstance(srvs, dict) and srvs:
+            return {"mcpServers": srvs}
+        if raw:
+            return raw
+        return {}
+
+    def _build_mcp(pid: str, shared: dict, _existing: dict) -> dict:
+        if pid != "host" and profile_meta_map.get(pid, {}).get("sanitize_mcp"):
+            out = dict(shared)
+            if isinstance(out.get("mcpServers"), dict):
+                out["mcpServers"] = sanitize_mcp_servers(out["mcpServers"])
+            return out
+        return shared
+
+    def _bootstrap_mcp(valid_recs: list[dict]) -> dict:
+        merged = {}
+        extra = {}
+        for r in valid_recs:
+            sh = r["shared"] or {}
+            if isinstance(sh.get("mcpServers"), dict):
+                for k, v in sh["mcpServers"].items():
+                    if k not in merged:
+                        merged[k] = v
+            for k, v in sh.items():
+                if k != "mcpServers" and k not in extra:
+                    extra[k] = v
+        out = dict(extra)
+        if merged:
+            out["mcpServers"] = merged
+        return out
+
+    ch, sd = _sync_field_aware_json(
+        "mcp_config_json",
+        _participants(Path("config") / "mcp_config.json", exclude_no_mcp=True),
+        _extract_mcp,
+        _build_mcp,
+        _bootstrap_mcp,
+        state_files,
+        skip_if_empty_all=True,
+    )
+    if ch:
+        synced_keys.append("config/mcp_config.json")
+    state_dirty = state_dirty or sd
+
+    # 3. Raw files: hooks.json, GEMINI.md, AGENTS.md, workflows.json, antigravity-cli/settings.json
+    raw_specs = [
+        ("hooks_json", Path("config") / "hooks.json", True),
+        ("workflows_json", Path("config") / "workflows.json", True),
+        ("cli_settings_json", Path("antigravity-cli") / "settings.json", True),
+        ("gemini_md", Path("GEMINI.md"), False),
+        ("agents_md", Path("AGENTS.md"), False),
+    ]
+    for rkey, rel_path, is_json in raw_specs:
+        ch, sd = _sync_raw_file(rkey, _participants(rel_path), state_files, require_valid_json=is_json)
+        if ch:
+            synced_keys.append(str(rel_path))
+        state_dirty = state_dirty or sd
+
+    # 4. Editor User/settings.json (exclude update.mode so sandboxes stay update.mode=none)
+    def _extract_editor_settings(raw: dict) -> dict:
+        return {k: v for k, v in raw.items() if k != "update.mode"}
+
+    def _build_editor_settings(pid: str, shared: dict, existing: dict) -> dict:
+        out = dict(shared)
+        if pid != "host":
+            out["update.mode"] = "none"
+        elif "update.mode" in existing:
+            out["update.mode"] = existing["update.mode"]
+        return out
+
+    def _bootstrap_editor_settings(valid_recs: list[dict]) -> dict:
+        merged = {}
+        host_r = next((r for r in valid_recs if r["id"] == "host"), None)
+        if host_r:
+            merged.update(host_r["shared"] or {})
+        for r in valid_recs:
+            for k, v in (r["shared"] or {}).items():
+                if k not in merged:
+                    merged[k] = v
+        return merged
+
+    ch, sd = _sync_field_aware_json(
+        "editor_user_settings",
+        _participants(None, use_app_user="settings.json"),
+        _extract_editor_settings,
+        _build_editor_settings,
+        _bootstrap_editor_settings,
+        state_files,
+        skip_if_empty_all=True,
+    )
+    if ch:
+        synced_keys.append("User/settings.json")
+    state_dirty = state_dirty or sd
+
+    # 5. Editor User/keybindings.json
+    ch, sd = _sync_raw_file(
+        "editor_keybindings",
+        _participants(None, use_app_user="keybindings.json"),
+        state_files,
+        require_valid_json=True,
+    )
+    if ch:
+        synced_keys.append("User/keybindings.json")
+    state_dirty = state_dirty or sd
+
+    if state_dirty:
+        _save_sync_state(profiles_dir, state)
+
+    return {"synced_files": synced_keys, "state_dirty": state_dirty}
+
+
+def is_profile_sync_enabled(profile_dir: Path) -> bool:
+    meta_file = profile_dir / "profile.json"
+    if not meta_file.is_file():
+        return False
+    try:
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        return meta.get("sync_enabled", True) is not False
+    except Exception:
+        return True
+
+
+def sync_profile(profile_dir: Path, real_home: Optional[Path] = None) -> dict:
+    """Sync symlinks and per-profile Desktop<->CLI OAuth tokens for one profile."""
+    if real_home is None:
+        real_home = get_real_home()
+    meta = {}
+    meta_file = profile_dir / "profile.json"
+    if meta_file.is_file():
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    policy = meta.get("symlink_policy", "full")
+    setup_home_symlinks(real_home, profile_dir / "home", policy)
+    linked = []
+    if meta.get("sync_enabled", True) is not False:
+        linked = setup_shared_config_links(profile_dir, real_home=real_home)
+    token_synced = sync_profile_auth_tokens(profile_dir)
+    return {"dirs_linked": linked, "token_synced": token_synced}
+
+
+def sync_all_profiles(profiles_dir: Optional[Path] = None) -> dict:
+    """Run full Tier 1 + Tier 2 real-time sync across host and all sync-enabled profiles."""
+    if profiles_dir is None:
+        profiles_dir = get_profiles_dir()
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    real_home = get_real_home()
+
+    lock_f = None
+    if fcntl is not None:
+        try:
+            lock_path = profiles_dir / ".sync.lock"
+            lock_f = open(lock_path, "a+")
+            fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX)
+        except OSError:
+            if lock_f:
+                lock_f.close()
+                lock_f = None
+
+    try:
+        all_profiles = sorted(
+            [p for p in profiles_dir.iterdir() if p.is_dir() and not p.name.startswith(".") and (p / "profile.json").is_file()]
+        )
+        synced_profiles = []
+        dirs_linked = {}
+        tokens_synced = []
+
+        for pdir in all_profiles:
+            if is_profile_sync_enabled(pdir):
+                synced_profiles.append(pdir)
+            res = sync_profile(pdir, real_home=real_home)
+            if res["dirs_linked"]:
+                dirs_linked[pdir.name] = res["dirs_linked"]
+            if res["token_synced"]:
+                tokens_synced.append(pdir.name)
+
+        file_res = reconcile_shared_files(synced_profiles, profiles_dir, real_home=real_home)
+        if not IS_WINDOWS:
+            try:
+                os.chmod(profiles_dir, 0o700)
+            except OSError:
+                pass
+        return {
+            "profiles": [p.name for p in synced_profiles],
+            "dirs_linked": dirs_linked,
+            "tokens_synced": tokens_synced,
+            "synced_files": file_res.get("synced_files", []),
+        }
+    finally:
+        if lock_f is not None:
+            try:
+                fcntl.flock(lock_f.fileno(), fcntl.LOCK_UN)
+                lock_f.close()
+            except OSError:
+                pass
+
+
+def get_sync_plist_path() -> Path:
+    return get_real_home() / "Library" / "LaunchAgents" / f"{SYNC_AGENT_LABEL}.plist"
+
+
+def get_sync_daemon_pid(profiles_dir: Optional[Path] = None) -> int:
+    if profiles_dir is None:
+        profiles_dir = get_profiles_dir()
+    pid_file = profiles_dir / ".sync.pid"
+    if pid_file.is_file():
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            if is_pid_running(pid):
+                if IS_WINDOWS:
+                    return pid
+                try:
+                    out = subprocess.check_output(["ps", "-o", "command=", "-p", str(pid)], stderr=subprocess.DEVNULL)
+                    if "sync" in out.decode("utf-8", "replace") and "_daemon" in out.decode("utf-8", "replace"):
+                        return pid
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    if not IS_WINDOWS and not is_ephemeral_test_home():
+        try:
+            out = subprocess.check_output(["pgrep", "-f", "--", "paragravity sync _daemon"], stderr=subprocess.DEVNULL)
+            pids = [int(p) for p in out.decode().split() if p.strip().isdigit()]
+            if pids:
+                return pids[0]
+        except Exception:
+            pass
+    return 0
+
+
+def ensure_sync_daemon(profiles_dir: Optional[Path] = None) -> dict:
+    """Install and start the lightweight background sync LaunchAgent (or background daemon)."""
+    if profiles_dir is None:
+        profiles_dir = get_profiles_dir()
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    real_home = get_real_home()
+    if is_ephemeral_test_home(real_home):
+        return {"method": "disabled-in-test", "running": False, "pid": None, "plist": None}
+    cli_path = get_canonical_cli_path()
+    py_bin = sys.executable or shutil.which("python3") or "/usr/bin/python3"
+
+    existing_pid = get_sync_daemon_pid(profiles_dir)
+
+    if IS_DARWIN:
+        import plistlib
+        plist_path = get_sync_plist_path()
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path = profiles_dir / "sync-daemon.log"
+        plist_data = {
+            "Label": SYNC_AGENT_LABEL,
+            "ProgramArguments": [py_bin, str(cli_path), "sync", "_daemon"],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "ProcessType": "Background",
+            "StandardOutPath": str(log_path),
+            "StandardErrorPath": str(log_path),
+            "EnvironmentVariables": {
+                "HOME": str(real_home),
+                "PATH": f"{real_home / '.local' / 'bin'}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+            },
+        }
+        plist_bytes = plistlib.dumps(plist_data)
+        plist_changed = (not plist_path.is_file()) or (plist_path.read_bytes() != plist_bytes)
+        if plist_changed:
+            _write_bytes_atomic(plist_path, plist_bytes, mode=0o644)
+
+        if not existing_pid or plist_changed:
+            subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+            res = subprocess.run(["launchctl", "load", "-w", str(plist_path)], capture_output=True, text=True)
+            if res.returncode == 0:
+                for _ in range(15):
+                    pid = get_sync_daemon_pid(profiles_dir)
+                    if pid:
+                        return {"method": "launchd", "running": True, "pid": pid, "plist": str(plist_path)}
+                    time.sleep(0.1)
+
+    if not existing_pid:
+        log_path = profiles_dir / "sync-daemon.log"
+        with open(log_path, "ab") as log_f:
+            popen_kwargs = {
+                "stdout": log_f,
+                "stderr": subprocess.STDOUT,
+                "env": {**os.environ, "HOME": str(real_home)},
+            }
+            if IS_WINDOWS:
+                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            else:
+                popen_kwargs["start_new_session"] = True
+            proc = subprocess.Popen([py_bin, str(cli_path), "sync", "_daemon"], **popen_kwargs)
+        return {"method": "daemon", "running": True, "pid": proc.pid, "plist": str(get_sync_plist_path()) if IS_DARWIN else None}
+
+    return {"method": "launchd" if IS_DARWIN else "daemon", "running": True, "pid": existing_pid, "plist": str(get_sync_plist_path()) if IS_DARWIN else None}
+
+
+def stop_sync_daemon(profiles_dir: Optional[Path] = None) -> bool:
+    if profiles_dir is None:
+        profiles_dir = get_profiles_dir()
+    if IS_DARWIN:
+        plist_path = get_sync_plist_path()
+        if plist_path.is_file():
+            subprocess.run(["launchctl", "unload", "-w", str(plist_path)], capture_output=True)
+    pid = get_sync_daemon_pid(profiles_dir)
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+            for _ in range(20):
+                if not is_pid_running(pid):
+                    break
+                time.sleep(0.1)
+        except OSError:
+            pass
+    (profiles_dir / ".sync.pid").unlink(missing_ok=True)
+    return True
+
+
+def get_sync_status_data(profiles_dir: Optional[Path] = None) -> dict:
+    if profiles_dir is None:
+        profiles_dir = get_profiles_dir()
+    real_home = get_real_home()
+    host_cfg = real_home / ".gemini" / "config"
+    projects_count = len([p for p in (host_cfg / "projects").glob("*.json")]) if (host_cfg / "projects").is_dir() else 0
+    skills_count = len([p for p in (host_cfg / "skills").iterdir() if not p.name.startswith(".")]) if (host_cfg / "skills").is_dir() else 0
+    plugins_count = len([p for p in (host_cfg / "plugins").iterdir() if p.is_dir() and not p.name.startswith(".")]) if (host_cfg / "plugins").is_dir() else 0
+
+    daemon_pid = get_sync_daemon_pid(profiles_dir)
+    launchd_loaded = False
+    if IS_DARWIN and not is_ephemeral_test_home(real_home):
+        res = subprocess.run(["launchctl", "list", SYNC_AGENT_LABEL], capture_output=True)
+        launchd_loaded = (res.returncode == 0)
+
+    profiles_status = []
+    if profiles_dir.is_dir():
+        for pdir in sorted(profiles_dir.iterdir()):
+            if pdir.is_dir() and not pdir.name.startswith(".") and (pdir / "profile.json").is_file():
+                cfg = pdir / "home" / ".gemini" / "config"
+                linked_ok = all(
+                    _is_dir_link_or_junction(cfg / sub)
+                    for sub in ("projects", "skills", "plugins")
+                )
+                profiles_status.append({
+                    "name": pdir.name,
+                    "sync_enabled": is_profile_sync_enabled(pdir),
+                    "dirs_linked": linked_ok,
+                    "cli_token_synced": (pdir / "home" / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").is_file(),
+                })
+
+    return {
+        "daemon_running": bool(daemon_pid),
+        "daemon_pid": daemon_pid or None,
+        "launchd_loaded": launchd_loaded,
+        "plist_path": str(get_sync_plist_path()) if IS_DARWIN else None,
+        "shared_counts": {
+            "projects": projects_count,
+            "skills": skills_count,
+            "plugins": plugins_count,
+        },
+        "profiles": profiles_status,
+    }
+
+
+def get_shims_dir() -> Path:
+    return get_profiles_dir() / "shims"
+
+
+def get_active_profile_file() -> Path:
+    return get_profiles_dir() / ".active_profile"
+
+
+def normalize_profile_target(name: str) -> str:
+    clean = name.strip()
+    if clean.lower() in ("host", "default", "real", "system", "local"):
+        return "host"
+    validate_profile_name(clean)
+    return clean
+
+
+def get_active_profile_with_source() -> tuple[str, str]:
+    profiles_dir = get_profiles_dir()
+    env_prof = os.environ.get("PGRAV_PROFILE", "").strip()
+    if env_prof:
+        if env_prof.lower() in ("host", "default", "real", "system", "local"):
+            return "host", "env:PGRAV_PROFILE"
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", env_prof) and (profiles_dir / env_prof / "profile.json").is_file():
+            return env_prof, "env:PGRAV_PROFILE"
+
+    active_file = get_active_profile_file()
+    if active_file.is_file():
+        try:
+            raw = active_file.read_text(encoding="utf-8").strip()
+            if raw.lower() in ("host", "default", "real", "system", "local"):
+                return "host", "file"
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", raw) and (profiles_dir / raw / "profile.json").is_file():
+                return raw, "file"
+        except OSError:
+            pass
+
+    env_home = Path(os.environ.get("HOME", ""))
+    parts = env_home.parts
+    if len(parts) >= 3 and parts[-1] == "home" and parts[-3] == ".antigravity-profiles":
+        cand = parts[-2]
+        if (profiles_dir / cand / "profile.json").is_file():
+            return cand, "env:HOME"
+
+    return "host", "default"
+
+
+def get_active_profile() -> str:
+    target, _ = get_active_profile_with_source()
+    return target
+
+
+def set_active_profile(name: str) -> str:
+    target = normalize_profile_target(name)
+    profiles_dir = get_profiles_dir()
+    profiles_dir.mkdir(parents=True, exist_ok=True)
+    if target != "host":
+        pdir = profiles_dir / target
+        if not (pdir / "profile.json").is_file():
+            raise ValueError(f"Profile '{target}' does not exist.")
+    _write_text_atomic(get_active_profile_file(), target + "\n", mode=0o644)
+    return target
+
+
+def _wrap_windows_cmd(bin_path: str, args_list: list[str]) -> list[str]:
+    cmd = [bin_path, *args_list]
+    if IS_WINDOWS and str(bin_path).lower().endswith((".cmd", ".bat")):
+        return ["cmd.exe", "/c", *cmd]
+    return cmd
+
+
+def get_real_agy_binary() -> Optional[str]:
+    env_bin = os.environ.get("ANTIGRAVITY_CLI_BIN")
+    shims_dir = get_shims_dir().resolve() if get_shims_dir().exists() else get_shims_dir()
+    real_home = get_real_home()
+    candidates = []
+    if env_bin:
+        candidates.append(Path(env_bin).expanduser())
+    if IS_WINDOWS:
+        candidates.extend([
+            real_home / ".local" / "bin" / "agy.cmd",
+            real_home / ".local" / "bin" / "agy.exe",
+            real_home / ".gemini" / "bin" / "agy.cmd",
+            real_home / ".gemini" / "bin" / "agy.exe",
+        ])
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            if entry:
+                candidates.append(Path(entry) / "agy.cmd")
+                candidates.append(Path(entry) / "agy.exe")
+    else:
+        candidates.extend([
+            real_home / ".local" / "bin" / "agy",
+            real_home / ".gemini" / "bin" / "agy",
+        ])
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            if entry:
+                candidates.append(Path(entry) / "agy")
+
+    for cand in candidates:
+        try:
+            if not cand.is_file() or not os.access(cand, os.X_OK):
+                continue
+            if cand.resolve().parent == shims_dir:
+                continue
+            return str(cand)
+        except OSError:
+            continue
+    return None
+
+
+def _ensure_shell_rc_path_block(rc_path: Path, shims_dir: Path, create_if_missing: bool) -> bool:
+    if not rc_path.exists() and not create_if_missing:
+        return False
+    start_marker = "# >>> paragravity cli shim >>>"
+    end_marker = "# <<< paragravity cli shim <<<"
+    block = (
+        f"{start_marker}\n"
+        f'export PATH="{shims_dir}:$PATH"\n'
+        f"{end_marker}\n"
+    )
+    existing = rc_path.read_text(encoding="utf-8") if rc_path.is_file() else ""
+    cleaned = re.sub(
+        rf"\n?{re.escape(start_marker)}.*?{re.escape(end_marker)}\n?",
+        "\n",
+        existing,
+        flags=re.DOTALL,
+    ).rstrip()
+    updated = (cleaned + "\n\n" + block) if cleaned else block
+    if updated == existing:
+        return False
+    _write_text_atomic(rc_path, updated, mode=0o644)
+    return True
+
+
+def ensure_agy_shim() -> dict:
+    """Install/refresh the `agy` PATH shim and wire shell RC files."""
+    shims_dir = get_shims_dir()
+    shims_dir.mkdir(parents=True, exist_ok=True)
+    if not IS_WINDOWS:
+        try:
+            os.chmod(shims_dir, 0o755)
+        except OSError:
+            pass
+
+    cli_path = get_canonical_cli_path()
+    py_bin = sys.executable or shutil.which("python3") or "python3"
+    real_home = get_real_home()
+    updated_rcs = []
+
+    if IS_WINDOWS:
+        shim_path = shims_dir / "agy.cmd"
+        shim_body = f'@echo off\r\n"{py_bin}" "{cli_path}" _exec-agy %*\r\n'
+        if not shim_path.is_file() or shim_path.read_text(encoding="utf-8", errors="replace") != shim_body:
+            _write_text_atomic(shim_path, shim_body, mode=0o755)
+    else:
+        shim_path = shims_dir / "agy"
+        shim_body = (
+            "#!/bin/sh\n"
+            f'PARAGRAVITY_BIN="{cli_path}"\n'
+            "if command -v python3 >/dev/null 2>&1; then\n"
+            '    exec python3 "$PARAGRAVITY_BIN" _exec-agy "$@"\n'
+            "fi\n"
+            f'exec "{py_bin}" "$PARAGRAVITY_BIN" _exec-agy "$@"\n'
+        )
+        if not shim_path.is_file() or shim_path.read_text(encoding="utf-8", errors="replace") != shim_body:
+            _write_text_atomic(shim_path, shim_body, mode=0o755)
+        try:
+            os.chmod(shim_path, 0o755)
+        except OSError:
+            pass
+
+        for rc_name, create_missing in ((".zshenv", True), (".zshrc", False), (".bashrc", False), (".bash_profile", False)):
+            rc_file = real_home / rc_name
+            if _ensure_shell_rc_path_block(rc_file, shims_dir, create_missing):
+                updated_rcs.append(str(rc_file))
+
+    return {
+        "shim_path": str(shim_path),
+        "shims_dir": str(shims_dir),
+        "updated_rcs": updated_rcs,
+        "in_path": str(shims_dir) in os.environ.get("PATH", "").split(os.pathsep),
+    }
+
+
+def build_profile_cli_env(target: str, args_list: list[str]) -> dict:
+    real_home = get_real_home()
+    env = os.environ.copy()
+
+    # Keep user ~/.local/bin in PATH while stripping shims_dir to avoid recursion
+    shims_str = str(get_shims_dir())
+    path_parts = [p for p in env.get("PATH", "").split(os.pathsep) if p and p != shims_str]
+    local_bin = str(real_home / ".local" / "bin")
+    if local_bin not in path_parts:
+        path_parts.append(local_bin)
+    env["PATH"] = os.pathsep.join(path_parts)
+    if (real_home / ".nvm").is_dir():
+        env.setdefault("NVM_DIR", str(real_home / ".nvm"))
+
+    if target == "host":
+        env["HOME"] = str(real_home)
+        if env.get("SSH_CONNECTION") == FAKE_SSH_CONN:
+            env.pop("SSH_CONNECTION", None)
+        if env.get("SSH_CLIENT") == FAKE_SSH_CLIENT:
+            env.pop("SSH_CLIENT", None)
+        env.pop("AGY_CLI_DISABLE_AUTO_UPDATE", None)
+        return env
+
+    profiles_dir = get_profiles_dir()
+    profile_dir = profiles_dir / target
+    if not (profile_dir / "profile.json").is_file():
+        raise ValueError(f"Profile '{target}' does not exist.")
+
+    sync_profile(profile_dir, real_home=real_home)
+    home_dir = profile_dir / "home"
+    env["HOME"] = str(home_dir.resolve())
+    env["PARAGRAVITY_REAL_HOME"] = str(real_home)
+    if IS_WINDOWS:
+        env["USERPROFILE"] = str(home_dir.resolve())
+        env["APPDATA"] = str((home_dir / "AppData" / "Roaming").resolve())
+        env["LOCALAPPDATA"] = str((home_dir / "AppData" / "Local").resolve())
+    env["SSH_CONNECTION"] = FAKE_SSH_CONN
+    env["SSH_CLIENT"] = FAKE_SSH_CLIENT
+    if args_list[:1] != ["update"]:
+        env.setdefault("AGY_CLI_DISABLE_AUTO_UPDATE", "1")
+    return env
+
+
+def cmd_exec_agy(raw_args: list[str]) -> int:
+    """Internal entrypoint invoked by the `agy` shim."""
+    target = get_active_profile()
+    real_agy = get_real_agy_binary()
+    if not real_agy:
+        print(f"{COLOR_RED}Error: Real 'agy' binary not found in ~/.local/bin/agy or PATH.{COLOR_RESET}", file=sys.stderr)
+        return 127
+    try:
+        env = build_profile_cli_env(target, raw_args)
+    except ValueError as e:
+        print(f"{COLOR_RED}Error: {e}{COLOR_RESET}", file=sys.stderr)
+        return 1
+
+    if IS_WINDOWS:
+        res = subprocess.run(_wrap_windows_cmd(real_agy, raw_args), env=env)
+        if target != "host":
+            sync_profile_auth_tokens(get_profiles_dir() / target)
+        return res.returncode
+
+    # If interactive or login-like subcommands are run, wait and mirror tokens back;
+    # otherwise exec directly for zero overhead and full signal/TTY fidelity.
+    if target != "host" and (not raw_args or raw_args[0] in ("login", "auth", "install", "update")):
+        res = subprocess.run([real_agy, *raw_args], env=env)
+        sync_profile_auth_tokens(get_profiles_dir() / target)
+        return res.returncode
+
+    os.execve(real_agy, [real_agy, *raw_args], env)
+    return 1
+
+
+def cmd_cli(raw_args: list[str]) -> int:
+    """Run agy CLI under a target profile (or the active profile)."""
+    if raw_args == ["--help-pgrav"]:
+        print("Usage: pgrav cli [profile|host] [--] [agy args...]")
+        print("Runs the Antigravity CLI (`agy`) bound to the given profile or currently active profile.")
+        return 0
+
+    profiles_dir = get_profiles_dir()
+    target = None
+    agy_args = list(raw_args)
+
+    if agy_args and not agy_args[0].startswith("-"):
+        cand = agy_args[0]
+        if cand.lower() in ("host", "default", "real", "system", "local"):
+            target = "host"
+            agy_args = agy_args[1:]
+        elif re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", cand) and (profiles_dir / cand / "profile.json").is_file():
+            target = cand
+            agy_args = agy_args[1:]
+
+    if agy_args[:1] == ["--"]:
+        agy_args = agy_args[1:]
+
+    if target is None:
+        target = get_active_profile()
+
+    real_agy = get_real_agy_binary()
+    if not real_agy:
+        print(f"{COLOR_RED}Error: Real 'agy' binary not found in ~/.local/bin/agy or PATH.{COLOR_RESET}", file=sys.stderr)
+        return 127
+
+    try:
+        env = build_profile_cli_env(target, agy_args)
+    except ValueError as e:
+        print(f"{COLOR_RED}Error: {e}{COLOR_RESET}", file=sys.stderr)
+        return 1
+
+    res = subprocess.run(_wrap_windows_cmd(real_agy, agy_args), env=env)
+    if target != "host":
+        sync_profile_auth_tokens(profiles_dir / target)
+    return res.returncode
+
+
+def cmd_use(args):
+    """Switch active profile for `agy` CLI (and optionally launch GUI)."""
+    target = normalize_profile_target(args.name)
+    profiles_dir = get_profiles_dir()
+
+    if target != "host" and not (profiles_dir / target / "profile.json").is_file():
+        print(f"{COLOR_RED}Error: Profile '{target}' does not exist.{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    shim_info = ensure_agy_shim()
+    sync_all_profiles(profiles_dir)
+    set_active_profile(target)
+
+    if target == "host":
+        info = extract_host_info()
+        account = info.get("account") or "(Not signed in)"
+    else:
+        info = extract_account_info(profiles_dir / target)
+        account = info.get("email") or "(Not signed in)"
+
+    print(f"{COLOR_GREEN}✓ Switched active `agy` CLI profile to '{COLOR_BOLD}{target}{COLOR_RESET}{COLOR_GREEN}'{COLOR_RESET}")
+    print(f"  • Account:  {COLOR_CYAN}{account}{COLOR_RESET}")
+    print(f"  • agy Shim: {shim_info['shim_path']}")
+    if shim_info["updated_rcs"]:
+        print(f"  • Shell RC: updated {', '.join(shim_info['updated_rcs'])} (open a new shell or run: source ~/.zshrc)")
+    elif not shim_info["in_path"]:
+        print(f"  • Tip:      run {COLOR_CYAN}export PATH=\"{shim_info['shims_dir']}:$PATH\"{COLOR_RESET} or open a new shell to activate shim")
+
+    if getattr(args, "launch", False) and target != "host":
+        print()
+        cmd_launch(args)
+
+
+def cmd_current(args):
+    """Show which profile `agy` CLI currently targets."""
+    target, source = get_active_profile_with_source()
+    profiles_dir = get_profiles_dir()
+    real_agy = get_real_agy_binary()
+    shim_path = get_shims_dir() / ("agy.cmd" if IS_WINDOWS else "agy")
+
+    if target == "host":
+        info = extract_host_info()
+        account = info.get("account")
+        has_token = info.get("has_token", False)
+    else:
+        info = extract_account_info(profiles_dir / target)
+        account = info.get("email")
+        has_token = info.get("has_token", False)
+
+    payload = {
+        "active_profile": target,
+        "source": source,
+        "account": account,
+        "has_token": has_token,
+        "shim_installed": shim_path.is_file(),
+        "shim_path": str(shim_path),
+        "real_agy": real_agy,
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    print(f"\n{COLOR_BOLD}Active `agy` CLI Target:{COLOR_RESET} {COLOR_CYAN}{target}{COLOR_RESET} ({source})")
+    print(f"  • Account:    {account or '(Not signed in)'}")
+    print(f"  • Shim:       {shim_path} ({'installed' if shim_path.is_file() else 'not installed — run pgrav use ' + target})")
+    print(f"  • Real agy:   {real_agy or '(not found)'}\n")
+
+
+def cmd_env(args):
+    """Print shell export statement for per-terminal profile override."""
+    target = normalize_profile_target(args.name)
+    profiles_dir = get_profiles_dir()
+    if target != "host" and not (profiles_dir / target / "profile.json").is_file():
+        print(f"{COLOR_RED}Error: Profile '{target}' does not exist.{COLOR_RESET}", file=sys.stderr)
+        sys.exit(1)
+    print(f"export PGRAV_PROFILE='{target}'")
+
+
+def cmd_sync(args):
+    """Run or manage real-time data synchronization across host and all profiles."""
+    action = getattr(args, "action", "now") or "now"
+    profiles_dir = get_profiles_dir()
+
+    if action == "_daemon":
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        daemon_lock = None
+        if fcntl is not None:
+            try:
+                daemon_lock = open(profiles_dir / ".sync_daemon.lock", "w")
+                fcntl.flock(daemon_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                return
+        pid_file = profiles_dir / ".sync.pid"
+        _write_text_atomic(pid_file, f"{os.getpid()}\n", mode=0o644)
+        running = True
+
+        def _handle_sig(_signum, _frame):
+            nonlocal running
+            running = False
+
+        signal.signal(signal.SIGTERM, _handle_sig)
+        signal.signal(signal.SIGINT, _handle_sig)
+        try:
+            while running:
+                try:
+                    sync_all_profiles(profiles_dir)
+                except Exception:
+                    pass
+                time.sleep(2.0)
+        finally:
+            pid_file.unlink(missing_ok=True)
+            if daemon_lock is not None:
+                try:
+                    fcntl.flock(daemon_lock.fileno(), fcntl.LOCK_UN)
+                    daemon_lock.close()
+                except OSError:
+                    pass
+        return
+
+    if action == "stop":
+        stop_sync_daemon(profiles_dir)
+        print(f"{COLOR_GREEN}✓ ParaGravity real-time sync daemon stopped.{COLOR_RESET}")
+        return
+
+    if action in ("start", "restart"):
+        if action == "restart":
+            stop_sync_daemon(profiles_dir)
+        res = sync_all_profiles(profiles_dir)
+        d_info = ensure_sync_daemon(profiles_dir)
+        status_data = get_sync_status_data(profiles_dir)
+        counts = status_data["shared_counts"]
+        print(f"{COLOR_GREEN}✓ Real-time sync daemon active ({d_info['method']}, PID: {d_info['pid']}){COLOR_RESET}")
+        print(f"  • Synced Profiles: {', '.join(res['profiles']) or '(none)'}")
+        print(f"  • Shared Catalog:  {counts['projects']} project(s), {counts['skills']} skill(s), {counts['plugins']} plugin(s)")
+        return
+
+    if action == "status":
+        status_data = get_sync_status_data(profiles_dir)
+        if getattr(args, "json", False):
+            print(json.dumps(status_data, indent=2, ensure_ascii=False))
+            return
+        counts = status_data["shared_counts"]
+        d_state = f"{COLOR_GREEN}● Running (PID: {status_data['daemon_pid']}){COLOR_RESET}" if status_data["daemon_running"] else f"{COLOR_DIM}○ Stopped{COLOR_RESET}"
+        print(f"\n{COLOR_BOLD}ParaGravity Real-Time Sync Status{COLOR_RESET}")
+        print(f"  • Sync Daemon:    {d_state}")
+        if IS_DARWIN:
+            print(f"  • LaunchAgent:    {status_data['plist_path']} ({'loaded' if status_data['launchd_loaded'] else 'not loaded'})")
+        print(f"  • Shared Catalog: {counts['projects']} project(s), {counts['skills']} skill(s), {counts['plugins']} plugin(s)")
+        for p in status_data["profiles"]:
+            flag = f"{COLOR_GREEN}✓ linked{COLOR_RESET}" if p["dirs_linked"] else f"{COLOR_YELLOW}! unlinked{COLOR_RESET}"
+            cli_tok = "cli-token: yes" if p["cli_token_synced"] else "cli-token: no"
+            print(f"  • Profile {p['name']:<14} sync={'on' if p['sync_enabled'] else 'off'}  {flag}  ({cli_tok})")
+        print()
+        return
+
+    # action == "now"
+    res = sync_all_profiles(profiles_dir)
+    d_info = None if getattr(args, "once", False) else ensure_sync_daemon(profiles_dir)
+    status_data = get_sync_status_data(profiles_dir)
+    counts = status_data["shared_counts"]
+    print(f"{COLOR_GREEN}✓ Sync completed across host and {len(res['profiles'])} profile(s).{COLOR_RESET}")
+    print(f"  • Shared Catalog: {counts['projects']} project(s), {counts['skills']} skill(s), {counts['plugins']} plugin(s)")
+    if res["tokens_synced"]:
+        print(f"  • CLI Auth Sync:  {', '.join(res['tokens_synced'])}")
+    if res["synced_files"]:
+        print(f"  • Updated Files:  {', '.join(res['synced_files'])}")
+    if d_info:
+        print(f"  • Sync Daemon:    {d_info['method']} active (PID: {d_info['pid']})")
+
+
 def cmd_create(args):
     """Create a new isolated profile."""
     profiles_dir = get_profiles_dir()
     profiles_dir.mkdir(parents=True, exist_ok=True)
+    real_home = get_real_home()
 
     name = args.name.strip()
     validate_profile_name(name)
@@ -1054,7 +2758,7 @@ def cmd_create(args):
     harden_profile_perms(profile_dir, profiles_dir)
 
     # Symlink developer configs from real HOME according to the chosen policy
-    setup_home_symlinks(Path.home(), home_dir, args.links)
+    setup_home_symlinks(real_home, home_dir, args.links)
 
     inheritance_report = None
     if inherited_source:
@@ -1065,22 +2769,33 @@ def cmd_create(args):
             inherit_mcp=inherit_mcp
         )
 
+    sync_enabled = (not getattr(args, "no_sync", False)) and (
+        not getattr(args, "clone_from", None) or getattr(args, "sync", False)
+    )
+
     # Create profile metadata
     meta = {
         "name": name,
         "description": args.description or "",
         "symlink_policy": args.links,
         "inherited_from": inherited_source,
+        "sync_enabled": sync_enabled,
+        "no_mcp": bool(getattr(args, "no_mcp", False)),
+        "sanitize_mcp": bool(getattr(args, "inherit_config", False)),
         "created_at": datetime.now().isoformat(),
         "version": 1
     }
     with open(profile_dir / "profile.json", "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
+    if sync_enabled:
+        sync_all_profiles(profiles_dir)
+
     app_path = create_desktop_shortcut(name)
 
     print(f"{COLOR_GREEN}✓ Profile '{COLOR_BOLD}{name}{COLOR_RESET}{COLOR_GREEN}' created successfully!{COLOR_RESET}")
     print(f"  • Sandbox Dir: {profile_dir}")
+    print(f"  • Real-Time Sync: {COLOR_GREEN}enabled{COLOR_RESET}" if sync_enabled else f"  • Real-Time Sync: {COLOR_YELLOW}disabled (--no-sync){COLOR_RESET}")
     if inherited_source:
         source_label = "host environment" if inherited_source == "host" else f"profile '{inherited_source}'"
         items = []
@@ -1101,7 +2816,7 @@ def cmd_create(args):
         print()
         cmd_launch(args)
 
-def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
+def profile_summary(profile_dir: Path, include_size: bool = False, active_cli: Optional[str] = None) -> dict:
     """Machine-readable summary of one profile (used by both `list --json`
     and the human table)."""
     name = profile_dir.name
@@ -1117,6 +2832,9 @@ def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
         except Exception:
             pass
 
+    if active_cli is None:
+        active_cli = get_active_profile()
+
     return {
         "name": name,
         "running": bool(pid),
@@ -1125,6 +2843,8 @@ def profile_summary(profile_dir: Path, include_size: bool = False) -> dict:
         "has_token": acc_info.get("has_token", False),
         "token_exp": acc_info.get("token_exp"),
         "token_state": token_expiry_state(acc_info.get("token_exp")),
+        "active_cli": (name == active_cli),
+        "sync_enabled": meta.get("sync_enabled", True) is not False,
         "size": get_directory_size(profile_dir) if include_size else None,
         "directory": str(profile_dir),
         "created_at": meta.get("created_at"),
@@ -1136,36 +2856,50 @@ def cmd_list(args):
     """List all profiles, their status, and bound accounts."""
     as_json = bool(getattr(args, "json", False))
     profiles_dir = get_profiles_dir()
-    if not profiles_dir.exists():
-        # --json must emit valid JSON on stdout; human hints go to stderr.
-        if as_json:
-            print("[]")
-        else:
-            print(f"{COLOR_YELLOW}No profiles found. Create one with: paragravity create <name>{COLOR_RESET}")
-        return
+    active_cli = get_active_profile()
 
-    profiles = sorted([p for p in profiles_dir.iterdir() if p.is_dir() and (p / "profile.json").exists()])
-    if not profiles:
+    if not profiles_dir.exists():
         if as_json:
             print("[]")
-        else:
-            print(f"{COLOR_YELLOW}No profiles found in {profiles_dir}.{COLOR_RESET}")
-            print(f"Run: {COLOR_CYAN}paragravity create <name>{COLOR_RESET} to create your first profile.")
-        return
+            return
+        profiles = []
+    else:
+        profiles = sorted([p for p in profiles_dir.iterdir() if p.is_dir() and (p / "profile.json").exists()])
 
     include_size = bool(getattr(args, "size", False))
-    summaries = [profile_summary(p, include_size=include_size) for p in profiles]
+    summaries = [profile_summary(p, include_size=include_size, active_cli=active_cli) for p in profiles]
 
     if as_json:
         print(json.dumps(summaries, indent=2, ensure_ascii=False))
         return
 
+    host_info = extract_host_info()
     print(f"\n{COLOR_BOLD}{'PROFILE':<18} {'STATUS':<14} {'PID':<8} {'ACCOUNT (GOOGLE)':<30} {'SIZE':<10} {'DESCRIPTION'}{COLOR_RESET}")
-    print("─" * 95)
+    print("─" * 98)
+
+    host_status = f"{COLOR_GREEN}● Running{COLOR_RESET}" if host_info["running"] else f"{COLOR_DIM}○ Stopped{COLOR_RESET}"
+    host_pid = str(host_info["pid"]) if host_info["pid"] else "-"
+    host_email = host_info["account"] or f"{COLOR_DIM}(Not signed in){COLOR_RESET}"
+    if len(strip_ansi(host_email)) > 28:
+        host_email = host_email[:25] + "..."
+    host_badge = f" {COLOR_CYAN}[★ agy CLI]{COLOR_RESET}" if active_cli == "host" else ""
+    print(
+        f"{pad_visible(f'{COLOR_BOLD}host{COLOR_RESET}', 18)} "
+        f"{pad_visible(host_status, 14)} "
+        f"{pad_visible(host_pid, 8)} "
+        f"{pad_visible(host_email, 30)} "
+        f"{pad_visible('—', 10)} "
+        f"(System Host){host_badge}".rstrip()
+    )
+
+    if not summaries:
+        print("─" * 98)
+        print(f"{COLOR_YELLOW}No sandbox profiles yet. Create one with: pgrav create <name>{COLOR_RESET}\n")
+        return
+
+    print(f"{COLOR_DIM}{'─' * 98}{COLOR_RESET}")
 
     for s in summaries:
-        p = profiles_dir / s["name"]
-
         if s["running"]:
             status_str = f"{COLOR_GREEN}● Running{COLOR_RESET}"
             pid_str = str(s["pid"])
@@ -1185,13 +2919,17 @@ def cmd_list(args):
         elif s["token_state"] == "expiring":
             warn = f"{COLOR_YELLOW}⚠ token expires soon{COLOR_RESET}"
 
+        cli_badge = f"{COLOR_CYAN}[★ agy CLI]{COLOR_RESET}" if s.get("active_cli") else ""
+        desc = s["description"] or ""
+        tail = " ".join(part for part in (desc, cli_badge, warn) if part)
+
         c_name = pad_visible(f"{COLOR_BOLD}{s['name']}{COLOR_RESET}", 18)
         c_status = pad_visible(status_str, 14)
         c_pid = pad_visible(pid_str, 8)
         c_email = pad_visible(email_str, 30)
         c_size = pad_visible(size_str, 10)
 
-        print(f"{c_name} {c_status} {c_pid} {c_email} {c_size} {s['description']} {warn}".rstrip())
+        print(f"{c_name} {c_status} {c_pid} {c_email} {c_size} {tail}".rstrip())
     print()
 
 def prune_logs(log_dir: Path, keep: int = 10):
@@ -1206,6 +2944,7 @@ def prune_logs(log_dir: Path, keep: int = 10):
 def cmd_launch(args):
     """Launch an Antigravity instance for a profile."""
     profiles_dir = get_profiles_dir()
+    real_home = get_real_home()
     name = args.name.strip()
     validate_profile_name(name)
     profile_dir = profiles_dir / name
@@ -1239,12 +2978,26 @@ def cmd_launch(args):
     data_dir = profile_dir / "data"
     home_dir = profile_dir / "home"
 
+    # Switch agy CLI and run sync before checking if GUI is already running
+    if not getattr(args, "keep_cli", False):
+        ensure_agy_shim()
+        set_active_profile(name)
+
+    if is_profile_sync_enabled(profile_dir):
+        sync_all_profiles(profiles_dir)
+        if not is_ephemeral_test_home(real_home):
+            ensure_sync_daemon(profiles_dir)
+    else:
+        sync_profile(profile_dir, real_home=real_home)
+
     # Clean any stale locks first (from crashed or killed sessions)
     cleaned_locks = clean_stale_locks(profile_dir, data_dir)
 
     pid = get_profile_process(profile_dir, data_dir)
     if pid:
         print(f"{COLOR_YELLOW}Profile '{name}' is already running (PID: {pid}).{COLOR_RESET}")
+        if not getattr(args, "keep_cli", False):
+            print(f"  • Active `agy` CLI switched to '{COLOR_CYAN}{name}{COLOR_RESET}'.")
         return
 
     app_bin = getattr(args, "app", None) or get_app_binary()
@@ -1266,11 +3019,12 @@ def cmd_launch(args):
     suppress_sandbox_autoupdate(profile_dir)
 
     policy = getattr(args, "links", None) or meta.get("symlink_policy", "full")
-    setup_home_symlinks(Path.home(), home_dir, policy)
+    setup_home_symlinks(real_home, home_dir, policy)
     harden_profile_perms(profile_dir, profiles_dir)
 
     env = os.environ.copy()
     env["HOME"] = str(home_dir.resolve())
+    env["PARAGRAVITY_REAL_HOME"] = str(real_home)
     if IS_WINDOWS:
         env["USERPROFILE"] = str(home_dir.resolve())
         roaming_appdata = home_dir / "AppData" / "Roaming"
@@ -1282,8 +3036,8 @@ def cmd_launch(args):
 
     # Bypass macOS Keychain for language_server: forces file-based token storage (~/.gemini/jetski-standalone-oauth-token)
     # This prevents keychain prompt collisions and isolates tokens per profile.
-    env["SSH_CONNECTION"] = "127.0.0.1 50000 127.0.0.1 22"
-    env["SSH_CLIENT"] = "127.0.0.1 50000 22"
+    env["SSH_CONNECTION"] = FAKE_SSH_CONN
+    env["SSH_CLIENT"] = FAKE_SSH_CLIENT
 
     cmd = [
         app_bin,
@@ -1298,6 +3052,8 @@ def cmd_launch(args):
     print(f"{COLOR_CYAN}Launching Antigravity for profile '{COLOR_BOLD}{name}{COLOR_RESET}{COLOR_CYAN}'...{COLOR_RESET}")
     print(f"  • User Data: {data_dir}")
     print(f"  • Home Dir:  {home_dir}")
+    if not getattr(args, "keep_cli", False):
+        print(f"  • agy CLI:   bound to '{COLOR_CYAN}{name}{COLOR_RESET}'")
     if workspace:
         print(f"  • Workspace: {workspace}")
 
@@ -1619,7 +3375,13 @@ def cmd_doctor(args):
             sys.exit(1)
         profiles = [target_dir]
     else:
-        profiles = sorted([p for p in profiles_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
+        profiles = sorted([
+            p for p in profiles_dir.iterdir()
+            if p.is_dir()
+            and not p.name.startswith(".")
+            and p.name not in ("shims", "ui")
+            and ((p / "profile.json").is_file() or (p / "data").is_dir())
+        ])
 
     is_json = getattr(args, "json", False)
     report_data = {
@@ -1639,10 +3401,42 @@ def cmd_doctor(args):
         print(f"Profiles Directory:       {profiles_dir}")
         print("=" * 60)
 
+    # Check global agy CLI shim and real-time sync daemon
+    shim_path = get_shims_dir() / ("agy.cmd" if IS_WINDOWS else "agy")
+    shim_ok = shim_path.is_file() and (IS_WINDOWS or os.access(shim_path, os.X_OK))
+    sync_status = get_sync_status_data(profiles_dir)
+    global_issues = []
+    global_fixes = []
+
+    if not shim_ok:
+        global_issues.append(f"agy CLI shim is not installed at {shim_path}")
+        if fix_mode:
+            shim_res = ensure_agy_shim()
+            global_fixes.append(f"Installed agy CLI shim at {shim_res['shim_path']}")
+    elif fix_mode:
+        ensure_agy_shim()
+
+    if not is_ephemeral_test_home() and not sync_status["daemon_running"]:
+        global_issues.append("Real-time sync daemon is not running")
+        if fix_mode:
+            d_res = ensure_sync_daemon(profiles_dir)
+            global_fixes.append(f"Started real-time sync daemon ({d_res['method']}, PID: {d_res['pid']})")
+
+    report_data["global_issues"] = global_issues
+    report_data["global_fixes"] = global_fixes
+    report_data["issues_found"] += len(global_issues)
+    report_data["issues_fixed"] += len(global_fixes)
+
     if not profiles:
+        if fix_mode:
+            sync_all_profiles(profiles_dir)
         if is_json:
             print(json.dumps(report_data, indent=2))
         else:
+            for iss in global_issues:
+                print(f"  {COLOR_YELLOW}! Issue:     {iss}{COLOR_RESET}")
+            for fx in global_fixes:
+                print(f"  {COLOR_GREEN}✓ Healed:    {fx}{COLOR_RESET}")
             print(f"{COLOR_YELLOW}No profiles found.{COLOR_RESET}\n")
         return
 
@@ -1727,17 +3521,37 @@ def cmd_doctor(args):
                 suppress_sandbox_autoupdate(pdir)
                 p_report["fixes"].append("Suppressed sandbox auto-updater in app_storage.json and User/settings.json")
 
-        # 4. Shortcut refresh on --fix
+        # 4. Sync links & Desktop <-> CLI OAuth token bridge
+        if is_profile_sync_enabled(pdir):
+            cfg = pdir / "home" / ".gemini" / "config"
+            missing_links = [
+                sub for sub in ("projects", "skills", "plugins")
+                if not ((cfg / sub).is_symlink() or (IS_WINDOWS and (cfg / sub).is_dir()))
+            ]
+            if missing_links:
+                p_report["issues"].append(f"Shared config directories not linked: {', '.join(missing_links)}")
+                if fix_mode:
+                    p_report["fixes"].append(f"Linked shared directories ({', '.join(missing_links)}) to host ~/.gemini/config")
+
+        gui_tok = pdir / "home" / ".gemini" / "jetski-standalone-oauth-token"
+        cli_tok = pdir / "home" / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+        if gui_tok.is_file() and not cli_tok.is_file():
+            p_report["issues"].append("agy CLI OAuth token mirror missing (Desktop token not bridged)")
+            if fix_mode:
+                if sync_profile_auth_tokens(pdir):
+                    p_report["fixes"].append("Bridged Desktop OAuth token to agy CLI token path")
+
+        # 5. Shortcut refresh on --fix
         if fix_mode:
             if IS_DARWIN:
-                app_shortcut = Path.home() / "Applications" / f"Antigravity ({pname}).app"
+                app_shortcut = get_real_home() / "Applications" / f"Antigravity ({pname}).app"
                 if app_shortcut.exists():
                     create_macos_app_shortcut(pname)
                     p_report["fixes"].append(f"Refreshed macOS shortcut with canonical CLI path: {app_shortcut.name}")
             elif IS_WINDOWS:
                 create_windows_shortcut(pname)
 
-        # 5. Account info
+        # 6. Account info
         acc_info = extract_account_info(pdir)
         p_report["account"] = acc_info.get("email")
         p_report["token_state"] = token_expiry_state(acc_info.get("token_exp"))
@@ -1765,11 +3579,24 @@ def cmd_doctor(args):
                 for fix in p_report["fixes"]:
                     print(f"  {COLOR_GREEN}✓ Healed:    {fix}{COLOR_RESET}")
             if not p_report["issues"] and not p_report["fixes"]:
-                print(f"  {COLOR_GREEN}✓ Health:    100% compatible & isolated (no issues){COLOR_RESET}")
+                print(f"  {COLOR_GREEN}✓ Health:    100% compatible & synced (no issues){COLOR_RESET}")
+
+    if fix_mode:
+        sync_res = sync_all_profiles(profiles_dir)
+        if not is_json and (sync_res.get("synced_files") or global_fixes):
+            print("\nGlobal Repairs:")
+            for fx in global_fixes:
+                print(f"  {COLOR_GREEN}✓ {fx}{COLOR_RESET}")
+            if sync_res.get("synced_files"):
+                print(f"  {COLOR_GREEN}✓ Synced shared files: {', '.join(sync_res['synced_files'])}{COLOR_RESET}")
 
     if is_json:
         print(json.dumps(report_data, indent=2))
     else:
+        if not fix_mode and global_issues:
+            print("\nGlobal Issues:")
+            for iss in global_issues:
+                print(f"  {COLOR_YELLOW}! {iss}{COLOR_RESET}")
         print("\n" + "=" * 60)
         if fix_mode:
             print(f"{COLOR_GREEN}Doctor repair complete: {report_data['issues_fixed']} issue(s) healed.{COLOR_RESET}\n")
@@ -1792,13 +3619,14 @@ def cmd_web(args):
     start_server(port=port, open_browser=not no_browser)
 
 def find_widget_binary() -> Path | None:
+    real_home = get_real_home()
     # 1. Next to current script
     local_bin = Path(__file__).resolve().parent / "pgrav-widget"
     if local_bin.is_file() and os.access(local_bin, os.X_OK):
         return local_bin
 
     # 2. ~/.local/bin/pgrav-widget
-    home_bin = Path.home() / ".local" / "bin" / "pgrav-widget"
+    home_bin = real_home / ".local" / "bin" / "pgrav-widget"
     if home_bin.is_file() and os.access(home_bin, os.X_OK):
         return home_bin
 
@@ -1810,7 +3638,7 @@ def find_widget_binary() -> Path | None:
     # 4. If not found, compile from src/widget/main.swift if swiftc exists
     swift_src = Path(__file__).resolve().parent.parent / "src" / "widget" / "main.swift"
     if swift_src.is_file() and shutil.which("swiftc"):
-        target_dir = Path.home() / ".local" / "bin"
+        target_dir = real_home / ".local" / "bin"
         target_dir.mkdir(parents=True, exist_ok=True)
         target_bin = target_dir / "pgrav-widget"
         print(f"{COLOR_CYAN} • Compiling native macOS desktop widget with swiftc...{COLOR_RESET}")
@@ -1823,11 +3651,12 @@ def find_widget_binary() -> Path | None:
     return None
 
 def find_ui_dist_dir() -> Path | None:
+    real_home = get_real_home()
     candidates = [
         Path(__file__).resolve().parent.parent / "ui" / "dist",
         Path(__file__).resolve().parent.parent / "gui" / "dist",
-        Path.home() / ".antigravity-profiles" / "ui",
-        Path.home() / ".local" / "share" / "paragravity" / "ui",
+        real_home / ".antigravity-profiles" / "ui",
+        real_home / ".local" / "share" / "paragravity" / "ui",
     ]
     for c in candidates:
         if c.is_dir() and (c / "index.html").is_file():
@@ -2015,6 +3844,13 @@ def main():
         except Exception:
             pass
 
+    # Pass-through commands before argparse so agy flags (-p, --model, -c, --help)
+    # are forwarded directly without argparse interception.
+    if len(sys.argv) >= 2 and sys.argv[1] in ("cli", "agy"):
+        sys.exit(cmd_cli(sys.argv[2:]))
+    if len(sys.argv) >= 2 and sys.argv[1] == "_exec-agy":
+        sys.exit(cmd_exec_agy(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(
         prog="paragravity",
         description=f"ParaGravity v{VERSION} - Native parallel multi-account & sandbox manager for Google Antigravity.",
@@ -2034,6 +3870,10 @@ def main():
                           help="Clone settings, keybindings, snippets and configs from an existing profile")
     p_create.add_argument("--no-mcp", action="store_true",
                           help="Do not inherit MCP tool configuration when using --inherit-config or --clone-from")
+    p_create.add_argument("--no-sync", action="store_true",
+                          help="Keep projects, skills, plugins, and settings isolated instead of real-time syncing with host")
+    p_create.add_argument("--sync", action="store_true",
+                          help="Enable real-time sync even when using --clone-from")
     p_create.add_argument("--links", choices=("full", "minimal", "none"), default="full",
                           help="How much of the real HOME to expose inside the profile "
                                "(full links everything incl. ~/.ssh/.config; minimal skips "
@@ -2056,7 +3896,37 @@ def main():
                           help="Override the profile's stored symlink policy for this launch")
     p_launch.add_argument("--heal", action="store_true",
                           help="Force auto-heal and refresh bytecode caches before launch")
+    p_launch.add_argument("--keep-cli", action="store_true",
+                          help="Do not switch the active `agy` CLI profile on launch")
     p_launch.set_defaults(func=cmd_launch)
+
+    # use / switch / select
+    p_use = subparsers.add_parser("use", aliases=["switch", "select"], help="Switch active profile for `agy` CLI (e.g. host, 20x, uta)")
+    p_use.add_argument("name", help="Target profile name or 'host'")
+    p_use.add_argument("-l", "--launch", action="store_true", help="Also launch the GUI window if target is a profile")
+    p_use.set_defaults(func=cmd_use)
+
+    # current / active / whoami
+    p_current = subparsers.add_parser("current", aliases=["active", "whoami"], help="Show active `agy` CLI profile and account")
+    p_current.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+    p_current.set_defaults(func=cmd_current)
+
+    # cli / agy
+    p_cli = subparsers.add_parser("cli", aliases=["agy"], help="Run `agy` CLI under a specific profile (`pgrav cli [profile|host] [agy args...]`)")
+    p_cli.add_argument("args", nargs=argparse.REMAINDER, help="Optional profile/host followed by agy arguments")
+
+    # env
+    p_env = subparsers.add_parser("env", help="Print shell export PGRAV_PROFILE=... for per-terminal switching")
+    p_env.add_argument("name", help="Target profile name or 'host'")
+    p_env.set_defaults(func=cmd_env)
+
+    # sync
+    p_sync = subparsers.add_parser("sync", help="Synchronize Projects, Skills, Plugins, Hooks, and settings across host & all profiles")
+    p_sync.add_argument("action", nargs="?", default="now", choices=["now", "start", "stop", "restart", "status", "_daemon"],
+                        help="Sync action (default: now)")
+    p_sync.add_argument("--once", action="store_true", help="Run one-shot sync without starting the background daemon")
+    p_sync.add_argument("--json", action="store_true", help="Output machine-readable JSON (for status)")
+    p_sync.set_defaults(func=cmd_sync)
 
     # doctor / health
     p_doctor = subparsers.add_parser("doctor", aliases=["heal"], help="Check system health, AntiGravity version compatibility, and fix stale locks/caches")

@@ -4,9 +4,19 @@ _paragravity_profiles() {
     local profiles_dir="${PARAGRAVITY_PROFILES_DIR:-${HOME}/.antigravity-profiles}"
     if [[ -d "$profiles_dir" ]]; then
         local -a profiles
-        profiles=($(find "$profiles_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null))
+        local d
+        for d in "$profiles_dir"/*(N/); do
+            [[ -f "$d/profile.json" ]] && profiles+=( "${d:t}" )
+        done
         _describe 'profiles' profiles
     fi
+}
+
+_paragravity_targets() {
+    local -a targets
+    targets=('host:Real system Antigravity host')
+    _describe 'targets' targets
+    _paragravity_profiles
 }
 
 _paragravity() {
@@ -17,12 +27,28 @@ _paragravity() {
         'ls:Alias for list'
         'launch:Launch Antigravity for a profile'
         'start:Alias for launch'
+        'use:Switch active agy CLI profile (or host)'
+        'switch:Alias for use'
+        'select:Alias for use'
+        'current:Show active agy CLI target and account'
+        'active:Alias for current'
+        'whoami:Alias for current'
+        'cli:Run agy CLI under a target profile'
+        'agy:Alias for cli'
+        'env:Print PGRAV_PROFILE shell export'
+        'sync:Synchronize Projects, Skills, Plugins, Hooks, and settings'
+        'doctor:Check health, locks, sync links, and agy shim'
+        'heal:Alias for doctor'
         'stop:Stop running instance of profile'
         'delete:Delete a profile and its shortcuts'
         'rm:Alias for delete'
         'info:Show detailed profile info'
         'path:Print profile directory path'
         'logs:Show the latest launch log of a profile'
+        'web:Launch Web Console'
+        'console:Alias for web'
+        'ui:Alias for web'
+        'widget:Manage macOS floating desktop widget'
     )
 
     _arguments -C \
@@ -37,8 +63,16 @@ _paragravity() {
             ;;
         args)
             case ${words[2]} in
-                launch|start|stop|delete|rm|info|path|logs)
+                launch|start|stop|delete|rm|info|path|logs|doctor|heal)
                     _paragravity_profiles
+                    ;;
+                use|switch|select|cli|agy|env)
+                    _paragravity_targets
+                    ;;
+                sync)
+                    local -a actions
+                    actions=('now:Run sync immediately' 'start:Start background sync daemon' 'stop:Stop background sync daemon' 'restart:Restart background sync daemon' 'status:Show real-time sync status')
+                    _describe 'sync actions' actions
                     ;;
                 create)
                     if [[ ${words[CURRENT-1]} == "--clone-from" ]]; then
@@ -50,6 +84,8 @@ _paragravity() {
                             '(-i --inherit-config)'{-i,--inherit-config}'[Inherit settings/skills/MCP from host]' \
                             '--clone-from[Clone settings from existing profile]:profile:_paragravity_profiles' \
                             '--no-mcp[Do not inherit MCP tool configuration]' \
+                            '--no-sync[Disable real-time sync for this profile]' \
+                            '--sync[Enable real-time sync even with --clone-from]' \
                             '--links[Symlink policy]:policy:(full minimal none)' \
                             '1:profile name:'
                     fi

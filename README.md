@@ -19,8 +19,35 @@ English | [简体中文](README_zh.md) | [Website / Docs](https://edison-land.gi
 - 🛡️ **100% Non-Invasive**: Built strictly on Chromium/Electron's official `--user-data-dir` sandboxing. Zero binary patching, zero internal database modifications, zero account security risks.
 - 🔑 **Native Google OAuth**: Complete, untouched Google Cloud authentication flow. Token refresh and sign-in redirects work seamlessly without proxies or interruptions.
 - 🔍 **Native Desktop Integration**: Automatically generates independent macOS `.app` bundles (indexed by Spotlight) or Windows Desktop & Start Menu shortcuts (`.lnk`). Launch your instances directly via **Spotlight (`Cmd + Space`)** or **Windows Search (`Win + S`)**.
-- ⚡ **Zero-Footprint & Ultra-Lightweight**: No background daemon eating RAM (0 MB idle overhead). Powered purely by Python 3 with zero external pip or npm dependencies.
-- 🗂️ **Total Workspace Isolation**: Each instance maintains completely separated extensions, local storage, indexedDB, and chat histories, preventing workspace contamination.
+- ⚡ **Zero-Footprint & Ultra-Lightweight**: Powered purely by Python 3 with zero external pip or npm dependencies, plus an optional lightweight LaunchAgent sync service when real-time sharing is enabled.
+- 🗂️ **Isolated Credentials + Real-Time Config Sync**: Every instance keeps its Google OAuth credentials, cookies, chat histories, and `remoteControlHostname` strictly isolated, while optionally syncing Projects, Skills, Plugins, Hooks, and `agy` CLI settings in real time across the host and all profiles.
+
+---
+
+## 🆕 What's New in v1.3.0
+
+1. **Accurate Antigravity 2.0 Sign-In & Host Detection**:
+   - Parses modern JSON `jetski-standalone-oauth-token` and `antigravity-oauth-token` payloads cleanly with zero Python `FutureWarning`, respects `refresh_token` sessions instead of falsely flagging 1-hour `access_token` expiry, and resolves the real user home via OS passwd even when executed inside a profile's integrated terminal.
+   - `pgrav list` displays the native `host` Antigravity instance alongside all sandbox profiles and marks the active CLI target with `[★ agy CLI]`.
+2. **Seamless `agy` CLI Switching Across Profiles & Host**:
+   - Automatically bridges per-profile Desktop OAuth tokens (`jetski-standalone-oauth-token`) and `agy` CLI tokens (`antigravity-cli/antigravity-oauth-token`) so signed-in GUI profiles work in `agy` without re-authenticating.
+   - Installs a lightweight `agy` shim so switching profiles switches `agy` in your terminal:
+     ```bash
+     pgrav use 20x            # Switch global `agy` CLI to profile 20x
+     pgrav use host           # Switch `agy` CLI back to the native host Antigravity
+     pgrav current            # Show the active `agy` target and bound account
+     pgrav cli uta -c         # Run a one-off `agy` command against profile uta
+     eval "$(pgrav env uta)"  # Override `agy` profile for the current shell tab only
+     ```
+3. **Two-Tier Real-Time Sync Across Host & All Profiles**:
+   - **Tier 1 (0ms Directory Symlink Hub)**: Losslessly merges and links `projects` (with automatic `swarm/swarm_board` deduplication), `skills`, `plugins`, `hooks`, `rules`, `agents`, `workflows`, `global_workflows`, `sidecars`, and `commands` to the host `~/.gemini/config`, along with expanded developer home links (`.agents`, `work`, etc.).
+   - **Tier 2 (Field-Aware Bidirectional Atomic File Sync)**: Uses a lightweight macOS LaunchAgent (`com.paragravity.sync`) to sync single-file configs (`config.json`, `mcp_config.json`, `hooks.json`, `antigravity-cli/settings.json`, `GEMINI.md`, `AGENTS.md`) while preserving per-instance `remoteControlHostname` / `remoteControlEnabled`.
+     ```bash
+     pgrav sync start     # Enable and start the background real-time sync daemon
+     pgrav sync status    # Inspect daemon status and shared Projects / Skills / Plugins
+     pgrav sync now       # Run a full sync immediately
+     ```
+     *New profiles join real-time sync by default; pass `--no-sync` (or `--clone-from` without `--sync`) to keep a profile isolated.*
 
 ---
 
